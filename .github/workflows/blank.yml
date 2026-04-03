@@ -56,3 +56,31 @@ jobs:
         with:
          name: htop
          path: ./htop/htop
+
+
+      - name: Install build dependencies
+        if: ${{ inputs.target == 'foot' }}
+        run: |
+          zypper -n refresh
+          zypper -n install --no-recommends \
+            gcc gcc-c++ make cmake ninja git pkg-config \
+            meson wayland-protocols-devel ncurses-devel libxkbcommon-devel libpixman-1-0-devel fontconfig-devel freetype2-devel tar
+            
+      - name: Configure&build
+        if: ${{ inputs.target == 'foot' }}
+        env:
+          CFLAGS: -O3 -g -flto
+          LDFLAGS: -O3 -g -flto
+        run: |
+           curl -L https://codeberg.org/dnkl/foot/releases/download/1.26.1/foot-1.26.1.tar.gz -o foot-1.26.1.tar.gz
+           tar xvf foot-1.26.1.tar.gz
+            cd foot-1.26.1
+            meson --buildtype=release --prefix=/usr -Db_lto=true ../..
+            ninja
+
+      - name: Upload artifacts
+        if: ${{ inputs.target == 'foot' }}
+        uses: actions/upload-artifact@v4
+        with:
+         name: foot
+         path: ./foot

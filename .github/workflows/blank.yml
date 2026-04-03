@@ -42,14 +42,15 @@ jobs:
       - name: Configure&build
         if: ${{ inputs.target == 'htop' }}
         env:
-          CFLAGS: -O3 -g -flto
+          CPPFLAGS: -D_GNU_SOURCE
+          CFLAGS: -O3 -g -flto -std=gnu11 -fno-finite-math-only
           LDFLAGS: -O3 -g -flto
         run: |
             git clone https://github.com/htop-dev/htop
             cd htop
             ./autogen.sh
             ./configure --enable-static  --enable-werror  --enable-unicode --disable-hwloc --disable-delayacct --enable-capabilities
-            make -j
+            make -k
 
       - name: Upload artifacts
         if: ${{ inputs.target == 'htop' }}

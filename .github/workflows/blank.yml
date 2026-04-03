@@ -85,3 +85,35 @@ jobs:
         with:
          name: foot
          path: ./foot-1.26.1
+
+      - name: Install build dependencies
+        if: ${{ inputs.target == 'sway' }}
+        run: |
+          zypper -n refresh
+          zypper -n install --no-recommends \
+            gcc gcc-c++ make cmake git ninja pkg-config \
+            meson wayland-protocols-devel wlroots-devel pcre2-devel libjson-c-devel pango-devel wayland-devel cairo-devel
+            
+      - name: Configure&build
+        if: ${{ inputs.target == 'sway' }}
+        env:
+          CFLAGS: -O3 -g -flto
+          LDFLAGS: -O3 -g -flto
+        run: |
+           git clone https://github.com/swaywm/sway
+           cd sway
+           git checkout 1.12-rc1
+           meson setup build/
+           ninja -C build/
+           git clone https://github.com/swaywm/swaybg/
+           cd swaybg
+           git checkout v1.2.2
+           meson build/
+           ninja -C build/
+
+      - name: Upload artifacts
+        if: ${{ inputs.target == 'sway' }}
+        uses: actions/upload-artifact@v4
+        with:
+         name: sway
+         path: ./sway

@@ -43,6 +43,10 @@ jobs:
           CFLAGS: -O3 -g -flto
           LDFLAGS: -O3 -g -flto
         run: |
+           git clone https://github.com/htop-dev/htop
+            cd htop
+            ./autogen.sh
+            ./autogen.sh
             ./configure
             make -k
 

@@ -84,4 +84,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
          name: foot
-         path: ./foot
+         path: ./foot-1.26.1

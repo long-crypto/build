@@ -32,40 +32,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install build dependencies
+        if: ${{ inputs.target == 'htop' }}
         run: |
           zypper -n refresh
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake ninja git pkg-config \
-            libopenssl-devel zlib-devel
-          if [ "${{ inputs.target }}" = "htop" ]; then
-            zypper -n install --no-recommends ncurses-devel
-          elif [ "${{ inputs.target }}" = "sway" ]; then
-            zypper -n install --no-recommends wayland-devel
-
-          elif [ "${{ inputs.target }}" = "foot" ]; then
-            zypper -n install --no-recommends wayland-devel
-
-          else
-            zypper -n install --no-recommends git
-          fi
+            libopenssl-devel zlib-devel ncurses-devel
 
       - name: Configure&build
+        if: ${{ inputs.target == 'htop' }}
         run: |
-          if [ "${{ inputs.target }}" = "htop" ]; then
             git clone https://github.com/htop-dev/htop
             cd htop
             ./autogen.sh
             ./configure --enable-static 
             make -j
-          elif [ "${{ inputs.target }}" = "sway" ]; then
-            echo "ok"
-
-          elif [ "${{ inputs.target }}" = "foot" ]; then
-            echo "ok"
-
-          else
-           echo "ok"
-          fi
 
       - name: Upload artifacts
         if: ${{ inputs.target == 'htop' }}

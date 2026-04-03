@@ -49,6 +49,15 @@ jobs:
             git clone https://github.com/htop-dev/htop
             cd htop
             ./autogen.sh
+            cat > t.c <<'EOF'
+            #include <math.h>
+            int main(void) {
+            double x = NAN;
+             return isgreater(x, x) || isgreaterequal(x, x);
+            }
+             EOF
+
+              gcc $CPPFLAGS $CFLAGS t.c -o t && ./t; echo $?
             ./configure --enable-static  --enable-werror  --enable-unicode --disable-hwloc --disable-delayacct --enable-capabilities
             make -k
 

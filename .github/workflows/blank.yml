@@ -92,7 +92,7 @@ jobs:
           zypper -n refresh
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake git ninja pkg-config \
-            meson wayland-protocols-devel wlroots-devel pcre2-devel libjson-c-devel pango-devel wayland-devel cairo-devel
+            meson wayland-protocols-devel wlroots-devel pcre2-devel libjson-c-devel pango-devel wayland-devel cairo-devel wlroots-devel
             
       - name: Configure&build
         if: ${{ inputs.target == 'sway' }}

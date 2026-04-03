@@ -37,7 +37,7 @@ jobs:
           zypper -n refresh
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake ninja git pkg-config \
-            libopenssl-devel zlib-devel ncurses-devel
+            libopenssl-devel zlib-devel ncurses-devel autoconf libtool
 
       - name: Configure&build
         if: ${{ inputs.target == 'htop' }}

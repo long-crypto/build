@@ -64,7 +64,7 @@ jobs:
           zypper -n refresh
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake ninja git pkg-config \
-            meson wayland-protocols-devel ncurses-devel libxkbcommon-devel libpixman-1-0-devel fontconfig-devel freetype2-devel tar
+            meson wayland-protocols-devel ncurses-devel libxkbcommon-devel libpixman-1-0-devel fontconfig-devel freetype2-devel tar wayland-devel
             
       - name: Configure&build
         if: ${{ inputs.target == 'foot' }}

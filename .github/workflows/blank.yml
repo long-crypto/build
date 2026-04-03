@@ -50,10 +50,10 @@ jobs:
             cat > t.c <<'EOF'
             #include <math.h>
             int main(void) {
-            double x = NAN;
-             return isgreater(x, x) || isgreaterequal(x, x);
+               double x = NAN;
+               return isgreater(x, x) || isgreaterequal(x, x);
             }
-             EOF
+            EOF
 
               gcc $CPPFLAGS $CFLAGS t.c -o t && ./t; echo $?
             ./configure --enable-static  --enable-werror  --enable-unicode --disable-hwloc --disable-delayacct --enable-capabilities

@@ -3,6 +3,18 @@ name: build on openSUSE Tumbleweed
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "选择构建类型"
+        required: true
+        default: "htop"
+        type: choice
+        options:
+          - htop
+          - sway
+          - foot
+          - git
 
 jobs:
   build:
@@ -25,7 +37,39 @@ jobs:
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake ninja git pkg-config \
             libopenssl-devel zlib-devel
+          if [ "${{ inputs.target }}" = "htop" ]; then
+            zypper -n install --no-recommends ncurses-devel
+          elif [ "${{ inputs.target }}" = "sway" ]; then
+            zypper -n install --no-recommends wayland-devel
 
-      - name: Configure
+          elif [ "${{ inputs.target }}" = "foot" ]; then
+            zypper -n install --no-recommends wayland-devel
+
+          else
+            zypper -n install --no-recommends git
+          fi
+
+      - name: Configure&build
         run: |
-          uname -a
+          if [ "${{ inputs.target }}" = "htop" ]; then
+            git clone https://github.com/htop-dev/htop
+            cd htop
+            ./autogen.sh
+            ./configure --enable-static 
+            make -j
+          elif [ "${{ inputs.target }}" = "sway" ]; then
+            echo "ok"
+
+          elif [ "${{ inputs.target }}" = "foot" ]; then
+            echo "ok"
+
+          else
+           echo "ok"
+          fi
+
+      - name: Upload artifacts
+        if: ${{ inputs.target == 'htop' }}
+        uses: actions/upload-artifact@v4
+        with:
+         name: htop
+         path: ./htop/htop

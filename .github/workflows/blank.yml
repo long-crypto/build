@@ -13,6 +13,7 @@ on:
           - sway
           - foot
           - git
+          - wl-clipboard
 
 jobs:
   build:
@@ -117,3 +118,26 @@ jobs:
         with:
          name: sway
          path: ./sway
+
+      - name: Install build dependencies
+        if: ${{ inputs.target == 'wl-clipboard' }}
+        run: |
+          zypper -n refresh
+          zypper -n install --no-recommends \
+            gcc gcc-c++ make cmake git ninja pkg-config \
+            meson wayland-protocols-devel wlroots-devel pcre2-devel libjson-c-devel pango-devel wayland-devel cairo-devel
+            
+      - name: Configure&build
+        if: ${{ inputs.target == 'wl-clipboard' }}
+        run: |
+           git clone https://github.com/bugaevc/wl-clipboard.git
+           cd wl-clipboard
+           meson setup build/
+           ninja -C build/
+
+      - name: Upload artifacts
+        if: ${{ inputs.target == 'wl-clipboard' }}
+        uses: actions/upload-artifact@v4
+        with:
+         name: wl-clipboard
+         path: ./wl-clipboard

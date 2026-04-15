@@ -93,7 +93,7 @@ jobs:
           zypper -n refresh
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake git ninja pkg-config \
-            meson wayland-protocols-devel wlroots-devel pcre2-devel libjson-c-devel pango-devel wayland-devel cairo-devel
+            meson wayland-protocols-devel wlroots-devel pcre2-devel libjson-c-devel pango-devel wayland-devel cairo-devel libevdev-devel
             
       - name: Configure&build
         if: ${{ inputs.target == 'sway' }}
@@ -103,7 +103,7 @@ jobs:
         run: |
            git clone https://github.com/swaywm/sway
            cd sway
-           git checkout 1.12-rc1
+           git checkout 1.12-rc2
            meson setup build/
            ninja -C build/
            git clone https://github.com/swaywm/swaybg/

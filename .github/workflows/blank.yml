@@ -31,6 +31,33 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install build dependencies
+        if: ${{ inputs.target == 'git' }}
+        run: |
+          mkdir -p  /run/media/jack/Data/bin/neovim
+          zypper -n refresh
+          zypper -n install --no-recommends \
+            gcc gcc-c++ make cmake git pkg-config \
+            libopenssl-devel zlib-devel ncurses-devel autoconf libtool curl-devel
+
+      - name: Configure&build
+        if: ${{ inputs.target == 'git' }}
+        run: |
+           git clone https://github.com/git/git
+            cd git
+            git checkout v2.54.0
+            ./configure --prefix=/run/media/jack/Data/bin/neovim
+            make -j
+            make install
+
+      - name: Upload artifacts
+        if: ${{ inputs.target == 'git' }}
+        uses: actions/upload-artifact@v4
+        with:
+         name: git
+         path: /run/media/jack/Data/bin/neovim
+
+
+      - name: Install build dependencies
         if: ${{ inputs.target == 'htop' }}
         run: |
           zypper -n refresh

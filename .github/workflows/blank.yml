@@ -131,7 +131,7 @@ jobs:
         run: |
            git clone https://github.com/swaywm/sway
            cd sway
-           git checkout 1.12-rc3
+           git checkout 1.12
            meson setup build/
            ninja -C build/
            git clone https://github.com/swaywm/swaybg/

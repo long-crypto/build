@@ -41,43 +41,35 @@ bootstrap_opensuse() {
 	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys install --no-recommends \
 		patterns-base-minimal_base \
 		steam \
-		Mesa-libEGL1 Mesa-libEGL1-32bit \
-		Mesa-libGL1 Mesa-libGL1-32bit \
+		Mesa-libEGL1 Mesa-libGL1 \
 		Mesa-dri \
-		vulkan-tools libvulkan1 libvulkan1-32bit \
-		libvulkan_intel libvulkan_intel-32bit \
-		libvulkan_radeon libvulkan_radeon-32bit \
-		pipewire libpipewire-0_3-0 libpipewire-0_3-0-32bit \
-		libpulse0 libpulse0-32bit \
-		libfreetype6 libfreetype6-32bit \
-		libfuse2 libfuse2-32bit \
-		mangohud gamemode \
-		zenity \
+		libvulkan1 libvulkan_intel libvulkan_radeon \
+		pipewire libpipewire-0_3-0 libpulse0 \
+		libfreetype6 libfuse2 \
+		mangohud gamemode zenity \
 		wget curl bash sed gawk grep \
 		xdg-utils \
-		libstdc++6 libstdc++6-32bit \
-		libgcc_s1 libgcc_s1-32bit \
-		glibc glibc-32bit glibc-locale glibc-utils \
-		libdbus-1-3 libdbus-1-3-32bit \
-		libsystemd0 libsystemd0-32bit \
-		libX11-6 libX11-6-32bit \
-		libxcb1 libxcb1-32bit \
-		libxshmfence1 libxshmfence1-32bit \
-		libXext6 libXext6-32bit \
-		libXfixes3 libXfixes3-32bit \
-		libXrender1 libXrender1-32bit \
-		libXrandr2 libXrandr2-32bit \
-		libXcursor1 libXcursor1-32bit \
-		libXi6 libXi6-32bit \
-		libXinerama1 libXinerama1-32bit \
-		libXxf86vm1 libXxf86vm1-32bit \
-		libfontconfig1 libfontconfig1-32bit \
-		libglvnd libglvnd-32bit \
-		libcurl4 libcurl4-32bit \
-		libopenssl3 libopenssl3-32bit \
-		zlib1 zlib1-32bit \
-		bubblewrap \
-		ca-certificates-mozilla
+		libstdc++6 libgcc_s1 glibc glibc-locale glibc-utils \
+		libdbus-1-3 libsystemd0 \
+		libX11-6 libxcb1 libXext6 libXfixes3 libXrender1 \
+		libXrandr2 libXcursor1 libXi6 libXinerama1 libXxf86vm1 \
+		libfontconfig1 libglvnd libcurl4 libz1 \
+		bubblewrap vulkan-tools ca-certificates-mozilla
+
+	echo '== installing 32-bit libraries'
+	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys install --no-recommends \
+		Mesa-libEGL1-32bit Mesa-libGL1-32bit \
+		libvulkan1-32bit libvulkan_intel-32bit libvulkan_radeon-32bit \
+		libpipewire-0_3-0-32bit libpulse0-32bit \
+		libfreetype6-32bit \
+		libstdc++6-32bit libgcc_s1-32bit glibc-32bit \
+		libdbus-1-3-32bit libsystemd0-32bit \
+		libX11-6-32bit libxcb1-32bit libXext6-32bit libXfixes3-32bit \
+		libXrender1-32bit libXrandr2-32bit libXcursor1-32bit libXi6-32bit \
+		libXinerama1-32bit libXxf86vm1-32bit \
+		libfontconfig1-32bit libglvnd-32bit libcurl4-32bit libz1-32bit \
+		libxshmfence1-32bit libopenssl3-32bit libfuse2-32bit \
+		|| echo 'WARNING: some 32-bit packages were not found, Steam may miss 32-bit libs'
 
 	VERSION=$(sudo zypper --root "$ROOTFS_DIR" info steam 2>/dev/null | awk '/^Version/ {print $3}' | head -1)
 	[ -n "$VERSION" ] && echo "$VERSION" > ~/version

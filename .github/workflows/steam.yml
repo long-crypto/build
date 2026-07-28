@@ -33,7 +33,7 @@ jobs:
             curl wget gzip tar xz file findutils \
             desktop-file-utils \
             fuse \
-            Mesa-libGL1 Mesa-libEGL1 
+            Mesa-libGL1 Mesa-libEGL1
 
           echo "==> Installing 32-bit libs (best effort) ..."
           zypper --non-interactive install --no-recommends \
@@ -108,6 +108,8 @@ jobs:
           Categories=Game;
           MimeType=x-scheme-handler/steam;
           EOF
+          # appimagetool requires *.desktop at AppDir root
+          ln -sf usr/share/applications/steam.desktop "$APPDIR/steam.desktop"
 
           # Icon
           if [ -f /usr/share/icons/hicolor/256x256/apps/steam.png ]; then

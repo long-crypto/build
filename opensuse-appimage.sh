@@ -2,209 +2,98 @@
 set -euo pipefail
 
 # =============================================================================
-# openSUSE-AppImage - Create portable AppImages from openSUSE Tumbleweed
+# Steam-AppImage (openSUSE Tumbleweed)
 # Based on the approach by ivan-hc (Steam-appimage / ArchImage)
 # =============================================================================
 
 VERSION="0.1.0"
-SCRIPT_NAME="$(basename "$0")"
-BASE_DIR="${HOME}/.local/share/opensuse-appimage"
-OPENED="opensuse-tumbleweed-container"
+SCRIPT="$(basename "$0")"
+BASE="${HOME}/.local/share/steam-appimage-opensuse"
 
-# ---- Colors ----
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
+# Colors
+R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'
+C='\033[0;36m'; B='\033[0;34m'; N='\033[0m'
 
-info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*" >&2; }
-err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
-banner(){ echo -e "${BLUE}$*${NC}"; }
+info()  { echo -e "${G}[INFO]${N}  $*"; }
+warn()  { echo -e "${Y}[WARN]${N}  $*" >&2; }
+err()   { echo -e "${R}[ERR]${N}  $*" >&2; exit 1; }
+step()  { echo -e "${C}[..]${N}  $*"; }
 
 # =============================================================================
 # Dependencies
 # =============================================================================
 
-check_deps() {
-    local missing=()
-    for dep in bubblewrap curl zypper tar jq; do
-        if ! command -v "$dep" &>/dev/null; then
-            missing+=("$dep")
-        fi
+check_host_deps() {
+    local miss=()
+    for d in bwrap curl tar zstd xz; do
+        command -v "$d" &>/dev/null || miss+=("$d")
     done
-    if command -v mksquashfs &>/dev/null; then
-        HAS_SQUASHFS=true
-    else
-        HAS_SQUASHFS=false
-        missing+=("squashfs-tools (mksquashfs)")
-    fi
-    if [ ${#missing[@]} -gt 0 ]; then
-        err "Missing dependencies: ${missing[*]}"
-        echo "  openSUSE: sudo zypper in bubblewrap curl zypper tar jq squashfs"
-        echo "  Debian:   sudo apt install bubblewrap curl tar jq squashfs-tools"
-        echo "  Fedora:   sudo dnf install bubblewrap curl tar jq squashfs-tools"
-        echo "  Arch:     sudo pacman -S bubblewrap curl tar jq squashfs-tools"
-        return 1
-    fi
+    command -v mksquashfs &>/dev/null && export HAS_SQUASHFS=true || { export HAS_SQUASHFS=false; miss+=("mksquashfs"); }
+    [ ${#miss[@]} -eq 0 ] && return 0
+    err "Missing: ${miss[*]}
+  Install with your package manager (e.g. apt/dnf/pacman/zypper)"
 }
 
 # =============================================================================
-# Container Rootfs Management
+# Rootfs
 # =============================================================================
 
-# Download openSUSE Tumbleweed container image and extract rootfs
-setup_rootfs() {
-    local target="$1"
-    local workdir="$2"
+download_rootfs() {
+    local dst="$1"
+    mkdir -p "$(dirname "$dst")"
 
-    mkdir -p "$workdir"
+    [ -f "$dst/etc/os-release" ] && { info "Rootfs already exists at $dst"; return 0; }
 
-    if [ -d "$target" ] && [ -f "$target/etc/os-release" ]; then
-        info "Rootfs already exists at $target"
-        return 0
+    step "Downloading openSUSE Tumbleweed container..."
+
+    local url="https://download.opensuse.org/tumbleweed/appliances/opensuse-tumbleweed-container.x86_64.tar.xz"
+    local tmp="$BASE/rootfs.tar"
+
+    curl -fSL --retry 5 --connect-timeout 30 --progress-bar -o "$tmp.xz" "$url" || {
+        warn "Primary URL failed, trying Docker Hub..."
+        local m
+        m=$(curl -fsSL \
+            "https://registry.hub.docker.com/v2/library/opensuse/tumbleweed/manifests/latest" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" 2>/dev/null || true)
+        [ -z "$m" ] && err "Cannot download openSUSE image."
+        local d=$(echo "$m" | python3 -c "import sys,json; print(json.load(sys.stdin)['layers'][0]['digest'])" 2>/dev/null || \
+                   echo "$m" | jq -r '.layers[0].digest')
+        curl -fsSL --retry 5 -o "$tmp.gz" \
+            "https://registry.hub.docker.com/v2/library/opensuse/tumbleweed/blobs/$d" || err "Download failed"
+        zstd -d "$tmp.gz" -o "$tmp" 2>/dev/null || gunzip "$tmp.gz" -c > "$tmp" 2>/dev/null || err "Decompress failed"
+    }
+
+    if [ -f "$tmp.xz" ]; then
+        xz -d "$tmp.xz" -c > "$tmp"
     fi
 
-    step "Downloading openSUSE Tumbleweed container image..."
+    step "Extracting rootfs..."
+    rm -rf "$dst"
+    mkdir -p "$dst"
+    tar xf "$tmp" -C "$dst"
+    rm -f "$tmp" "$tmp.xz" "$tmp.gz" "$tmp.zst"
 
-    local tmp_rootfs="$workdir/rootfs.tar"
-    local image_url="https://download.opensuse.org/tumbleweed/appliances/opensuse-tumbleweed-container.x86_64.tar.xz"
-
-    # Try multiple sources
-    if ! curl -fSL --retry 3 --connect-timeout 30 -o "$tmp_rootfs.xz" "$image_url" 2>/dev/null; then
-        # Fallback: use Docker hub image
-        local docker_url="https://registry.hub.docker.com/v2/library/opensuse/tumbleweed/manifests/latest"
-        warn "Primary source failed, trying alternative..."
-        local manifest
-        manifest=$(curl -fsSL "$docker_url" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" 2>/dev/null || true)
-        if [ -n "$manifest" ]; then
-            local digest=$(echo "$manifest" | jq -r '.layers[0].digest')
-            local layer_url="https://registry.hub.docker.com/v2/library/opensuse/tumbleweed/blobs/$digest"
-            curl -fsSL --retry 3 -o "$tmp_rootfs.gz" "$layer_url" || {
-                err "Failed to download openSUSE image. Please try again later."
-                rm -f "$tmp_rootfs.xz" "$tmp_rootfs.gz"
-                return 1
-            }
-            mv "$tmp_rootfs.gz" "$tmp_rootfs"
-        else
-            err "Failed to download openSUSE image from all sources."
-            rm -f "$tmp_rootfs.xz"
-            return 1
-        fi
-    else
-        mv "$tmp_rootfs.xz" "$tmp_rootfs.xz_final"
-        xz -d "$tmp_rootfs.xz_final" 2>/dev/null || {
-            # it might already be decompressed, try tar directly
-            mv "$tmp_rootfs.xz_final" "$tmp_rootfs"
-            # Check if it's a tar
-            if ! tar tf "$tmp_rootfs" &>/dev/null; then
-                warn "Uncompressing with xz..."
-                xz -d -c "$tmp_rootfs.xz_final" > "$tmp_rootfs" 2>/dev/null || true
-            fi
-        }
-        [ -f "$tmp_rootfs" ] || mv "$tmp_rootfs.xz_final" "$tmp_rootfs"
-    fi
-
-    step "Extracting rootfs to $target..."
-    mkdir -p "$target"
-
-    # Extract (handle both .tar and .tar.gz)
-    if file "$tmp_rootfs" | grep -q gzip; then
-        tar xzf "$tmp_rootfs" -C "$target"
-    else
-        tar xf "$tmp_rootfs" -C "$target"
-    fi
-
-    rm -f "$tmp_rootfs"*
-
-    # Verify
-    if [ -f "$target/etc/os-release" ]; then
-        info "Rootfs ready: $(grep PRETTY_NAME "$target/etc/os-release" | cut -d= -f2 | tr -d '"')"
-    else
-        err "Rootfs extraction failed"
-        return 1
-    fi
-}
-
-# Create a writable overlay for the read-only rootfs
-create_overlay() {
-    local base="$1"
-    local work="$2"
-    local upper="$2/upper"
-    local ov_work="$2/workdir"
-    local merged="$2/merged"
-
-    mkdir -p "$upper" "$ov_work" "$merged"
-    echo "$merged"
+    [ -f "$dst/etc/os-release" ] || err "Rootfs extraction failed."
+    info "Rootfs: $(grep PRETTY_NAME "$dst/etc/os-release" | cut -d= -f2 | tr -d '"')"
 }
 
 # =============================================================================
-# Bubblewrap Sandbox
+# Bubblewrap sandbox
 # =============================================================================
 
-# Enter the openSUSE environment using bubblewrap
-enter_sandbox() {
+bwrap_run() {
     local rootfs="$1"
     shift
-    local cmd="${*:-/bin/bash}"
-
-    if [ ! -d "$rootfs" ]; then
-        err "Rootfs not found: $rootfs"
-        return 1
-    fi
-
-    # Sync resolv.conf for networking
-    cp -f /etc/resolv.conf "$rootfs/etc/resolv.conf" 2>/dev/null || true
-
-    # Find a working shell in the rootfs
-    local shell="/bin/bash"
-    [ -x "$rootfs/bin/bash" ] || [ -x "$rootfs/usr/bin/bash" ] || shell="/bin/sh"
-
-    # Create necessary mount points
-    mkdir -p "$rootfs/proc" "$rootfs/sys" "$rootfs/dev" "$rootfs/run" "$rootfs/tmp"
-
-    exec bwrap \
-        --unshare-all \
-        --share-net \
-        --die-with-parent \
-        --ro-bind /sys /sys \
-        --proc /proc \
-        --dev /dev \
-        --tmpfs /tmp \
-        --tmpfs /run \
-        --bind "$rootfs" / \
-        --setenv PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-        --setenv HOME /root \
-        --setenv container docker \
-        --hostname opensuse-tumbleweed \
-        --cap-add ALL \
-        --seccomp unconfined \
-        ${shell} -c "
-            cd /root
-            exec ${cmd}
-        "
-}
-
-# Run a command non-interactively in the sandbox and return
-run_in_sandbox() {
-    local rootfs="$1"
-    shift
-    local cmd="$*"
-
-    if [ ! -d "$rootfs" ]; then
-        err "Rootfs not found: $rootfs"
-        return 1
-    fi
+    [ ! -d "$rootfs" ] && err "Rootfs not found: $rootfs"
 
     cp -f /etc/resolv.conf "$rootfs/etc/resolv.conf" 2>/dev/null || true
     mkdir -p "$rootfs/proc" "$rootfs/sys" "$rootfs/dev" "$rootfs/run" "$rootfs/tmp"
 
-    local shell="/bin/bash"
-    [ -x "$rootfs/bin/bash" ] || [ -x "$rootfs/usr/bin/bash" ] || shell="/bin/sh"
+    local sh="/bin/bash"
+    [ -x "$rootfs/bin/bash" ] || [ -x "$rootfs/usr/bin/bash" ] || sh="/bin/sh"
 
     bwrap \
-        --unshare-all \
-        --share-net \
-        --die-with-parent \
+        --unshare-all --share-net --die-with-parent \
         --ro-bind /sys /sys \
         --proc /proc \
         --dev /dev \
@@ -213,88 +102,159 @@ run_in_sandbox() {
         --bind "$rootfs" / \
         --setenv PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
         --setenv HOME /root \
-        --setenv container docker \
-        --hostname opensuse-tumbleweed \
+        --hostname opensuse-tw \
         --cap-add ALL \
         --seccomp unconfined \
-        ${shell} -c "
+        "$sh" -c "
             cd /root
-            ${cmd}
+            $*
         "
+}
 
-    [ -f "$rootfs/etc/resolv.conf.bak" ] && mv "$rootfs/etc/resolv.conf.bak" "$rootfs/etc/resolv.conf" 2>/dev/null || true
+bwrap_shell() {
+    local rootfs="$1"
+    local cmd="${2:-/bin/bash}"
+
+    cp -f /etc/resolv.conf "$rootfs/etc/resolv.conf" 2>/dev/null || true
+    mkdir -p "$rootfs/proc" "$rootfs/sys" "$rootfs/dev" "$rootfs/run" "$rootfs/tmp"
+
+    local sh="/bin/bash"
+    [ -x "$rootfs/bin/bash" ] || [ -x "$rootfs/usr/bin/bash" ] || sh="/bin/sh"
+
+    exec bwrap \
+        --unshare-all --share-net --die-with-parent \
+        --ro-bind /sys /sys \
+        --proc /proc \
+        --dev /dev \
+        --tmpfs /tmp \
+        --tmpfs /run \
+        --bind "$rootfs" / \
+        --setenv PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+        --setenv HOME /root \
+        --hostname opensuse-tw \
+        --cap-add ALL \
+        --seccomp unconfined \
+        "$sh" -c "
+            cd /root
+            exec $cmd
+        "
 }
 
 # =============================================================================
-# Zypper Package Management (inside sandbox)
+# Zypper helpers
 # =============================================================================
 
-# Install packages into the rootfs
-install_packages() {
-    local rootfs="$1"
-    shift
-    local packages="$*"
-
-    step "Installing packages: $packages"
-
-    cmd='
+zypper_install() {
+    local rootfs="$1"; shift
+    step "Installing: $*"
+    bwrap_run "$rootfs" "
         zypper --non-interactive --no-gpg-checks refresh 2>/dev/null || true
-        zypper --non-interactive --no-gpg-checks install '"$packages"'
-    '
-
-    run_in_sandbox "$rootfs" "$cmd"
+        zypper --non-interactive --no-gpg-checks install -y $* 2>&1 | tail -5
+    " || warn "Some packages may have failed to install"
 }
 
-# Update the rootfs (sync with Tumbleweed latest)
-update_rootfs() {
+zypper_update() {
     local rootfs="$1"
-
-    step "Updating openSUSE Tumbleweed packages..."
-
-    cmd='
+    step "Updating packages..."
+    bwrap_run "$rootfs" "
         zypper --non-interactive --no-gpg-checks refresh 2>/dev/null || true
-        zypper --non-interactive --no-gpg-checks update 2>/dev/null || true
-    '
-
-    run_in_sandbox "$rootfs" "$cmd"
+        zypper --non-interactive --no-gpg-checks update -y 2>&1 | tail -5
+    " || warn "Update may be incomplete"
 }
 
 # =============================================================================
-# AppImage Builder
+# Steam-specific package list
 # =============================================================================
 
-build_appimage() {
-    local rootfs="$1"
-    local app_name="$2"
-    local output="$3"
-    local entrypoint="${4:-"$app_name"}"
+STEAM_CORE="steam"
 
-    if [ ! -d "$rootfs" ]; then
-        err "Rootfs not found: $rootfs"
-        return 1
-    fi
+STEAM_DEPS_64="
+Mesa-libGL1 Mesa-libGLESv2_2 Mesa-libEGL1 Mesa-dri
+Mesa-vulkan-device-select vulkan-tools libvulkan1
+libpulse0 pulseaudio-utils
+libudev1 libusb-1_0-0
+libopenal1 libsndfile1
+libcurl4 NetworkManager
+libXi6 libXrandr2 libXfixes3 libXcursor1 libXinerama1
+libXext6 libX11-6 libxcb1 libXrender1 libXdamage1
+libXcomposite1 libXScrnSaver libXxf86vm1
+libpng16-16 libjpeg8 libtiff6
+freetype2 fontconfig
+libvdpau1 libva2 libva-drm2 libva-glx2 libva-x11-2
+pipewire-libjack libjack0 libasound2
+gtk3 libpango-1_0-0 cairo
+libdbus-1-3 dbus-1
+libnss3 nspr
+glib2 libgobject-2_0-0 libgio-2_0-0 libglib-2_0-0
+ca-certificates-mozilla
+"
 
-    step "Building AppImage: $app_name"
+STEAM_DEPS_32="
+steam-32bit
+Mesa-libGL1-32bit Mesa-libGLESv2_2-32bit Mesa-libEGL1-32bit Mesa-dri-32bit
+Mesa-vulkan-device-select-32bit libvulkan1-32bit vulkan-tools-32bit
+libpulse0-32bit
+libudev1-32bit libusb-1_0-0-32bit
+libopenal1-32bit libsndfile1-32bit
+libcurl4-32bit
+libXi6-32bit libXrandr2-32bit libXfixes3-32bit libXcursor1-32bit libXinerama1-32bit
+libXext6-32bit libX11-6-32bit libxcb1-32bit libXrender1-32bit libXdamage1-32bit
+libXcomposite1-32bit libXScrnSaver-32bit libXxf86vm1-32bit
+libpng16-16-32bit libjpeg8-32bit libtiff6-32bit
+freetype2-32bit fontconfig-32bit
+libvdpau1-32bit libva2-32bit libva-drm2-32bit libva-glx2-32bit libva-x11-2-32bit
+libasound2-32bit
+gtk3-32bit libpango-1_0-0-32bit cairo-32bit
+libdbus-1-3-32bit
+libnss3-32bit nspr-32bit
+libstdc++6-32bit libgcc_s1-32bit
+glibc-32bit glib2-32bit
+"
 
-    local build_dir="$BASE_DIR/build/$app_name"
-    rm -rf "$build_dir"
-    mkdir -p "$build_dir/AppDir"
+STEAM_OPTIONAL="
+steamtricks mangohud gamemode
+gamescope
+Mesa-libGLESv3_2 Mesa-libGLESv1_CM1
+libFAudio0 libFAudio0-32bit
+libvkd3d1 libvkd3d1-32bit
+wine
+"
 
-    # Copy rootfs into AppDir
-    info "Copying rootfs..."
-    cp -a "$rootfs"/. "$build_dir/AppDir/"
+# =============================================================================
+# Steam AppImage launcher (embedded in output)
+# =============================================================================
 
-    # Create AppRun
-    cat > "$build_dir/AppDir/AppRun" << 'APPRUNEOF'
+write_steam_launcher() {
+    cat << 'LAUNCHER'
 #!/bin/bash
+# Steam AppImage launcher (openSUSE Tumbleweed)
+
 HERE="$(dirname "$(readlink -f "${0}")")"
+
 export PATH="$HERE/usr/local/sbin:$HERE/usr/local/bin:$HERE/usr/sbin:$HERE/usr/bin:$HERE/sbin:$HERE/bin:$PATH"
 export LD_LIBRARY_PATH="$HERE/usr/lib64:$HERE/usr/lib:$HERE/lib64:$HERE/lib:$LD_LIBRARY_PATH"
 export XDG_DATA_DIRS="$HERE/usr/share:$XDG_DATA_DIRS"
+export STEAM_RUNTIME="$HERE/usr/lib/steam/steam-runtime"
+export STEAM_RUNTIME_HEAVY=1
+export SDL_VIDEO_DRIVER=x11
+export LIBGL_DRIVERS_PATH="$HERE/usr/lib64/dri:$HERE/usr/lib/dri"
+
+# Point Steam to libraries inside the AppImage
+export LD_PRELOAD="$HERE/usr/lib64/libstdc++.so.6:$HERE/usr/lib64/libgcc_s.so.1:$LD_PRELOAD"
+
+# Ensure Vulkan layer path
+export VK_LAYER_PATH="$HERE/usr/share/vulkan/explicit_layer.d:$HERE/usr/share/vulkan/implicit_layer.d:$VK_LAYER_PATH"
+export VK_ICD_FILENAMES="$HERE/usr/share/vulkan/icd.d:$VK_ICD_FILENAMES"
+
+# MangoHud
+[ -x "$HERE/usr/bin/mangohud" ] && export MANGOHUD=1
+
+# Gamemode
+[ -x "$HERE/usr/bin/gamemoderun" ] && alias gamemoderun="$HERE/usr/bin/gamemoderun"
 
 if command -v bubblewrap &>/dev/null; then
     exec bwrap \
-        --unshare-all \
+        --unshare-ipc \
         --share-net \
         --die-with-parent \
         --ro-bind /sys /sys \
@@ -303,287 +263,269 @@ if command -v bubblewrap &>/dev/null; then
         --tmpfs /tmp \
         --tmpfs /run \
         --bind "$HERE" / \
-        --ro-bind /home /home \
-        --ro-bind-try /mnt /mnt \
-        --ro-bind-try /media /media \
-        --ro-bind-try /run/media /run/media \
-        --ro-bind-try /tmp /real-tmp \
+        --bind /home /home \
+        --bind-try /mnt /mnt \
+        --bind-try /media /media \
+        --bind-try /run/media /run/media \
+        --bind-try /tmp/.X11-unix /tmp/.X11-unix \
         --bind-try /tmp/.X11-unix /tmp/.X11-unix \
         --bind-try /run/user /run/user \
         --bind-try /run/dbus /run/dbus \
+        --dev-bind-try /dev/dri /dev/dri \
+        --dev-bind-try /dev/nvidia0 /dev/nvidia0 \
+        --dev-bind-try /dev/nvidiactl /dev/nvidiactl \
+        --dev-bind-try /dev/nvidia-modeset /dev/nvidia-modeset \
+        --dev-bind-try /dev/nvidia-uvm /dev/nvidia-uvm \
+        --dev-bind-try /dev/nvidia-uvm-tools /dev/nvidia-uvm-tools \
         --ro-bind /etc/resolv.conf /etc/resolv.conf \
         --ro-bind-try /etc/localtime /etc/localtime \
+        --ro-bind-try /etc/machine-id /etc/machine-id \
         --setenv PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
         --setenv HOME "$HOME" \
-        --hostname opensuse-appimage \
+        --hostname steam-opensuse \
         --chdir "$HOME" \
         --unsetenv container \
-        /bin/sh -c "
-            cd \"$HOME\"
-            exec %ENTRYPOINT% \"\$@\"
-        " -- "$@"
+        /usr/bin/steam "$@"
 else
-    warn "bubblewrap not found on host, falling back to direct execution"
+    echo "WARNING: bubblewrap not found, running without sandbox."
     export APPDIR="$HERE"
     export APPIMAGE="$0"
     cd "$HOME"
-    exec "$HERE/usr/bin/%ENTRYPOINT%" "$@"
+    exec "$HERE/usr/bin/steam" "$@"
 fi
-APPRUNEOF
-    chmod +x "$build_dir/AppDir/AppRun"
+LAUNCHER
+}
 
-    # Replace placeholder
-    sed -i "s|%ENTRYPOINT%|$entrypoint|g" "$build_dir/AppDir/AppRun"
+write_squashfs_runtime() {
+    cat << 'RUNTIME'
+#!/usr/bin/env bash
+# SquashFS AppImage runtime
+HERE="$(dirname "$(readlink -f "${0}")")"
+MNT="${TMPDIR:-/tmp}/.steam-appimage-$$"
+cleanup() { fusermount -u "$MNT" 2>/dev/null; rmdir "$MNT" 2>/dev/null; }
+trap cleanup EXIT
+mkdir -p "$MNT"
 
-    # Create .desktop file
-    cat > "$build_dir/AppDir/${app_name}.desktop" << DESKEOF
+OFFSET=$(awk '/^__END_RUNTIME__$/ {print NR+1; exit}' "$0")
+
+if command -v squashfuse &>/dev/null; then
+    tail -n +"$OFFSET" "$0" | squashfuse "$MNT" -o ro,allow_other
+elif command -v unsquashfs &>/dev/null; then
+    tail -n +"$OFFSET" "$0" > "$MNT.squashfs"
+    unsquashfs -d "$MNT" -f "$MNT.squashfs"
+    rm -f "$MNT.squashfs"
+else
+    echo "ERROR: squashfuse or unsquashfs required to run this AppImage." >&2
+    exit 1
+fi
+
+exec "$MNT/AppRun" "$@"
+__END_RUNTIME__
+RUNTIME
+}
+
+# =============================================================================
+# Build
+# =============================================================================
+
+build_steam() {
+    local rootfs="$1"
+    local output="${2:-./Steam-opensuse-TW-x86_64.AppImage}"
+
+    [ ! -d "$rootfs" ] && err "Rootfs not found. Run 'setup' first."
+
+    step "Building Steam AppImage..."
+
+    local bdir="$BASE/build"
+    rm -rf "$bdir"
+    mkdir -p "$bdir/AppDir"
+
+    info "Copying rootfs (this may take a while)..."
+    cp -a "$rootfs"/. "$bdir/AppDir/"
+
+    # Write AppRun (Steam launcher)
+    write_steam_launcher > "$bdir/AppDir/AppRun"
+    chmod +x "$bdir/AppDir/AppRun"
+
+    # .desktop file
+    cat > "$bdir/AppDir/steam.desktop" << 'EOF'
 [Desktop Entry]
-Name=$app_name
-Exec=$app_name
+Name=Steam (openSUSE Tumbleweed)
+Comment=Application for managing and playing games on Steam
+Exec=AppRun
+Icon=steam
+Terminal=false
 Type=Application
-Categories=Utility;
-DESKEOF
+Categories=Game;
+EOF
 
-    # Copy icon if exists, otherwise create default
-    local icon_path="$build_dir/AppDir/${app_name}.png"
-    if [ ! -f "$icon_path" ]; then
-        # Create a 1-pixel PNG as placeholder
-        printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' > "$icon_path" 2>/dev/null || true
-    fi
+    # Symlink for AppImage spec
+    ln -sf AppRun "$bdir/AppDir/steam" 2>/dev/null || true
 
-    # Symlink for AppImage tooling
-    ln -sf AppRun "$build_dir/AppDir/$app_name" 2>/dev/null || true
+    # Try to copy Steam icons
+    for sz in 16 24 32 48 64 128 256; do
+        if [ -f "$bdir/AppDir/usr/share/icons/hicolor/${sz}x${sz}/apps/steam.png" ]; then
+            cp "$bdir/AppDir/usr/share/icons/hicolor/${sz}x${sz}/apps/steam.png" \
+               "$bdir/AppDir/steam.png" 2>/dev/null && break
+        fi
+    done
+    [ -f "$bdir/AppDir/steam.png" ] || touch "$bdir/AppDir/steam.png"
 
-    # Build AppImage
-    step "Creating AppImage..."
+    # Build
+    step "Packaging..."
 
-    if [ "$HAS_SQUASHFS" = true ]; then
-        # Use appimagetool or mksquashfs directly
+    if [ "${HAS_SQUASHFS:-false}" = true ]; then
         if command -v appimagetool &>/dev/null; then
-            ARCH=x86_64 appimagetool "$build_dir/AppDir" "$output" 2>/dev/null || {
-                # Fallback: manual squashfs + runtime
-                info "appimagetool failed, using manual method..."
-                mksquashfs "$build_dir/AppDir" "$build_dir/fs.squashfs" -comp xz -b 1048576 -Xdict-size 100% -noappend 2>/dev/null
-                cat_runtime > "$output"
+            ARCH=x86_64 appimagetool "$bdir/AppDir" "$output" 2>/dev/null || {
+                info "appimagetool failed, using mksquashfs..."
+                mksquashfs "$bdir/AppDir" "$bdir/fs.squashfs" -comp zstd -Xcompression-level 19 -noappend
+                write_squashfs_runtime > "$output"
                 chmod +x "$output"
-                # Append squashfs to runtime
+                cat "$bdir/fs.squashfs" >> "$output"
+                rm -f "$bdir/fs.squashfs"
             }
         else
-            # Manual AppImage creation with mksquashfs
-            mksquashfs "$build_dir/AppDir" "$build_dir/fs.squashfs" -comp xz -b 1048576 -Xdict-size 100% -noappend 2>/dev/null
-            cat_runtime > "$output"
+            mksquashfs "$bdir/AppDir" "$bdir/fs.squashfs" -comp zstd -Xcompression-level 19 -noappend
+            write_squashfs_runtime > "$output"
             chmod +x "$output"
-            cat "$build_dir/fs.squashfs" >> "$output"
-            rm -f "$build_dir/fs.squashfs"
+            cat "$bdir/fs.squashfs" >> "$output"
+            rm -f "$bdir/fs.squashfs"
         fi
     else
-        # No squashfs: create a self-extracting tar.gz AppImage
-        warn "squashfs-tools not available, creating self-extracting tar.gz..."
+        warn "No mksquashfs, creating self-extracting tar..."
         {
             echo '#!/bin/bash'
-            echo 'HERE="$(dirname "$(readlink -f "${0}")")"'
-            echo 'EXTRACT_DIR="${TMPDIR:-/tmp}/.opensuse-appimage-$$"'
-            echo 'mkdir -p "$EXTRACT_DIR"'
-            echo 'ARCHIVE_START=$(awk "/^__ARCHIVE_BELOW__$/ {print NR+1; exit}" "$0")'
-            echo 'tail -n +$ARCHIVE_START "$0" | tar xJ -C "$EXTRACT_DIR"'
-            echo 'exec "$EXTRACT_DIR/AppRun" "$@"'
-            echo 'exit'
-            echo '__ARCHIVE_BELOW__'
-            tar cJ -C "$build_dir/AppDir" .
+            echo 'D="$(mktemp -d)"'
+            echo 'trap "rm -rf $D" EXIT'
+            echo 'mkdir -p "$D"'
+            echo 'ARCHIVE_START=$(awk "/^__ARCHIVE__$/ {print NR+1; exit}" "$0")'
+            echo 'tail -n +$ARCHIVE_START "$0" | tar xJ -C "$D"'
+            echo 'exec "$D/AppRun" "$@"'
+            echo '__ARCHIVE__'
+            tar cJ -C "$bdir/AppDir" .
         } > "$output"
         chmod +x "$output"
     fi
 
-    rm -rf "$build_dir"
-    info "AppImage created: $output"
+    rm -rf "$bdir"
+    echo ""
+    info "Done: $output"
     ls -lh "$output"
-}
-
-cat_runtime() {
-    cat << 'RUNTIMEEOF'
-#!/usr/bin/env bash
-# AppImage Runtime for openSUSE
-HERE="$(dirname "$(readlink -f "${0}")")"
-APPDIR="${TMPDIR:-/tmp}/.mount_$(basename "$0")_$$"
-
-cleanup() { fusermount -u "$APPDIR" 2>/dev/null; rmdir "$APPDIR" 2>/dev/null; }
-trap cleanup EXIT
-
-mkdir -p "$APPDIR"
-OFFSET=$(awk '/^__END_RUNTIME__$/ {print NR+1; exit}' "$0")
-
-# Try squashfuse first
-if command -v squashfuse &>/dev/null; then
-    tail -n +"$OFFSET" "$0" | squashfuse "$APPDIR" -o ro,allow_other 2>/dev/null || {
-        # Fallback to extracting
-        tail -n +"$OFFSET" "$0" | unsquashfs -d "$APPDIR" -f - 2>/dev/null
-    }
-elif command -v unsquashfs &>/dev/null; then
-    tail -n +"$OFFSET" "$0" | unsquashfs -d "$APPDIR" -f -
-else
-    warn "Neither squashfuse nor unsquashfs found. Cannot run."
-    exit 1
-fi
-
-export PATH="$APPDIR/usr/local/sbin:$APPDIR/usr/local/bin:$APPDIR/usr/sbin:$APPDIR/usr/bin:$APPDIR/sbin:$APPDIR/bin:$PATH"
-export LD_LIBRARY_PATH="$APPDIR/usr/lib64:$APPDIR/usr/lib:$APPDIR/lib64:$APPDIR/lib:$LD_LIBRARY_PATH"
-export XDG_DATA_DIRS="$APPDIR/usr/share:$XDG_DATA_DIRS"
-
-if command -v bubblewrap &>/dev/null; then
-    exec bwrap \
-        --unshare-all \
-        --share-net \
-        --die-with-parent \
-        --ro-bind /sys /sys \
-        --proc /proc \
-        --dev /dev \
-        --tmpfs /tmp \
-        --tmpfs /run \
-        --bind "$APPDIR" / \
-        --ro-bind /home /home \
-        --ro-bind-try /mnt /mnt \
-        --ro-bind-try /media /media \
-        --ro-bind-try /run/media /run/media \
-        --bind-try /tmp/.X11-unix /tmp/.X11-unix \
-        --bind-try /run/user /run/user \
-        --bind-try /run/dbus /run/dbus \
-        --ro-bind /etc/resolv.conf /etc/resolv.conf \
-        --ro-bind-try /etc/localtime /etc/localtime \
-        --setenv PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-        --setenv HOME "$HOME" \
-        --hostname opensuse-appimage \
-        --chdir "$HOME" \
-        /AppRun.real "$@"
-else
-    exec "$APPDIR/AppRun.real" "$@"
-fi
-__END_RUNTIME__
-RUNTIMEEOF
+    echo ""
+    echo -e "  Run: ${G}./$output${N}"
 }
 
 # =============================================================================
-# Helper: List packages installed in rootfs
+# Setup: download rootfs + install Steam + all deps
 # =============================================================================
 
-list_packages() {
-    local rootfs="$1"
-    run_in_sandbox "$rootfs" "zypper search -i 2>/dev/null || rpm -qa"
+setup_steam() {
+    check_host_deps
+    local rootfs="$BASE/rootfs"
+
+    download_rootfs "$rootfs"
+
+    step "Bootstrapping base system..."
+    bwrap_run "$rootfs" "
+        zypper --non-interactive --no-gpg-checks refresh 2>/dev/null || true
+        zypper --non-interactive --no-gpg-checks install -y \
+            bash coreutils filesystem glibc glibc-locale-base \
+            shadow util-linux systemd-sysvinit 2>/dev/null || true
+    " || true
+
+    step "Installing Steam core package..."
+    zypper_install "$rootfs" "$STEAM_CORE"
+
+    step "Installing 64-bit dependencies..."
+    zypper_install "$rootfs" "$STEAM_DEPS_64"
+
+    step "Installing 32-bit dependencies..."
+    zypper_install "$rootfs" "$STEAM_DEPS_32"
+
+    step "Installing optional packages (MangoHud, GameMode, etc.)..."
+    zypper_install "$rootfs" "$STEAM_OPTIONAL" || true
+
+    echo ""
+    info "Steam setup complete!"
+    info "Run: $SCRIPT build [output-path]"
 }
 
 # =============================================================================
-# Main CLI
+# CLI
 # =============================================================================
 
 usage() {
     cat << EOF
-${SCRIPT_NAME} - Create portable AppImages from openSUSE Tumbleweed
+${SCRIPT} v${VERSION} - Steam AppImage from openSUSE Tumbleweed
 
 USAGE:
-  ${SCRIPT_NAME} install <pkg1> [pkg2 ...]  Install packages into the container
-  ${SCRIPT_NAME} build <appname> <output>    Build an AppImage
-  ${SCRIPT_NAME} build <appname> <output> <entrypoint>
-  ${SCRIPT_NAME} enter                       Enter the container shell
-  ${SCRIPT_NAME} update                      Update all packages in the container
-  ${SCRIPT_NAME} list                        List installed packages
-  ${SCRIPT_NAME} shell <command>             Run a single command in the container
-  ${SCRIPT_NAME} setup                       Download and setup the container
+  ${SCRIPT} setup              Download rootfs + install Steam + all deps
+  ${SCRIPT} build [output]     Build Steam AppImage (default: ./Steam-opensuse-TW-x86_64.AppImage)
+  ${SCRIPT} enter              Enter openSUSE sandbox (interactive shell)
+  ${SCRIPT} shell <cmd>        Run a command inside the sandbox
+  ${SCRIPT} update             zypper update all packages
+  ${SCRIPT} clean              Remove rootfs and all data
 
 EXAMPLES:
-  # Setup the container first
-  ${SCRIPT_NAME} setup
+  # First time
+  ${SCRIPT} setup
+  ${SCRIPT} build
 
-  # Install Firefox
-  ${SCRIPT_NAME} install MozillaFirefox
+  # Custom output path
+  ${SCRIPT} build ./my-steam.AppImage
 
-  # Build Firefox AppImage
-  ${SCRIPT_NAME} build firefox ./Firefox-x86_64.AppImage firefox
+  # Rebuild after updating
+  ${SCRIPT} update
+  ${SCRIPT} build
 
-  # Enter container for manual work
-  ${SCRIPT_NAME} enter
-
-VERSION: ${VERSION}
+  # Run the result
+  ./Steam-opensuse-TW-x86_64.AppImage
 EOF
 }
 
 main() {
-    local command="${1:-}"
+    local cmd="${1:-}"
     shift 2>/dev/null || true
 
-    case "$command" in
+    case "$cmd" in
         setup)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            # Basic bootstrap
-            step "Bootstrapping base packages..."
-            run_in_sandbox "$BASE_DIR/rootfs" '
-                zypper --non-interactive --no-gpg-checks refresh 2>/dev/null || true
-                zypper --non-interactive --no-gpg-checks install -y \
-                    bash coreutils filesystem glibc glibc-locale-base 2>/dev/null || true
-            '
-            info "openSUSE Tumbleweed container is ready!"
-            info "Next: opensuse-appimage install <packages>"
-            ;;
-        install)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            if [ $# -eq 0 ]; then
-                err "No packages specified."
-                echo "Usage: $SCRIPT_NAME install <pkg1> [pkg2 ...]"
-                exit 1
-            fi
-            install_packages "$BASE_DIR/rootfs" "$*"
-            info "Done."
+            setup_steam
             ;;
         build)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            if [ $# -lt 2 ]; then
-                err "Usage: $SCRIPT_NAME build <appname> <output> [entrypoint]"
-                exit 1
-            fi
-            build_appimage "$BASE_DIR/rootfs" "$1" "$2" "${3:-$1}"
+            local rootfs="$BASE/rootfs"
+            check_host_deps
+            download_rootfs "$rootfs"
+            build_steam "$rootfs" "${1:-./Steam-opensuse-TW-x86_64.AppImage}"
             ;;
         enter)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            step "Entering openSUSE Tumbleweed sandbox..."
-            enter_sandbox "$BASE_DIR/rootfs" "/bin/bash"
-            ;;
-        update)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            update_rootfs "$BASE_DIR/rootfs"
-            info "Done."
-            ;;
-        list)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            list_packages "$BASE_DIR/rootfs"
+            check_host_deps
+            download_rootfs "$BASE/rootfs"
+            bwrap_shell "$BASE/rootfs" "/bin/bash"
             ;;
         shell)
-            check_deps
-            setup_rootfs "$BASE_DIR/rootfs" "$BASE_DIR"
-            if [ $# -eq 0 ]; then
-                err "No command specified."
-                exit 1
-            fi
-            run_in_sandbox "$BASE_DIR/rootfs" "$*"
+            check_host_deps
+            download_rootfs "$BASE/rootfs"
+            [ $# -eq 0 ] && err "usage: $SCRIPT shell <command>"
+            bwrap_run "$BASE/rootfs" "$*"
+            ;;
+        update)
+            check_host_deps
+            download_rootfs "$BASE/rootfs"
+            zypper_update "$BASE/rootfs"
             ;;
         clean)
-            warn "Removing container at $BASE_DIR/rootfs"
-            rm -rf "$BASE_DIR/rootfs"
-            info "Removed."
+            warn "Removing $BASE"
+            rm -rf "$BASE"
+            info "Cleaned."
             ;;
         --version|-v)
-            echo "openSUSE-AppImage v${VERSION}"
+            echo "Steam-AppImage (openSUSE Tumbleweed) v${VERSION}"
             ;;
         --help|-h|"")
             usage
             ;;
         *)
-            err "Unknown command: $command"
-            usage
-            exit 1
+            err "Unknown: $cmd"; usage; exit 1
             ;;
     esac
 }

@@ -54,7 +54,8 @@ download_rootfs() {
         docker pull opensuse/tumbleweed 2>&1 | tail -3
         local cid
         cid=$(docker create opensuse/tumbleweed)
-        docker export "$cid" | tar xC "$dst" --exclude='dev/*' --exclude='proc/*' --exclude='sys/*'
+        mkdir -p "$dst"
+        docker export "$cid" | tar xC "$dst"
         docker rm "$cid" >/dev/null
         mkdir -p "$dst/dev" "$dst/proc" "$dst/sys"
         [ -f "$dst/etc/os-release" ] && return 0

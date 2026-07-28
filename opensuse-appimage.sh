@@ -379,11 +379,12 @@ build_steam() {
     step "Building Steam AppImage..."
 
     local bdir="$BASE/build"
-    rm -rf "$bdir"
+    [ -d "$bdir" ] && { chmod -R u+w "$bdir" 2>/dev/null; rm -rf "$bdir"; }
     mkdir -p "$bdir/AppDir"
 
     info "Copying rootfs (this may take a while)..."
     cp -a "$rootfs"/. "$bdir/AppDir/"
+    chmod -R u+w "$bdir/AppDir"
 
     # Write AppRun (Steam launcher)
     write_steam_launcher > "$bdir/AppDir/AppRun"
@@ -449,6 +450,7 @@ EOF
         chmod +x "$output"
     fi
 
+    chmod -R u+w "$bdir" 2>/dev/null
     rm -rf "$bdir"
     echo ""
     info "Done: $output"

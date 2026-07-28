@@ -1,0 +1,61 @@
+name: Utils CI
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron:  '0 12 1 * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: opensuse/tumbleweed
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: build
+      if: always()
+      run: |
+        chmod +x create-utils.sh
+        zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
+          patterns-devel-base-devel_basis \
+          gawk grep lz4 zstd wget \
+          curl gcc make autoconf libtool pkgconf libcap-devel fuse2 lzo \
+          patch xz zlib-devel findutils openssl-devel jemalloc xxhash \
+          boost-devel libarchive-devel libunwind-devel gtest fmt-devel gflags \
+          double-conversion-devel cmake ruby3.4-rubygem-ronn libevent-devel \
+          libdwarf-devel git clang libsodium-devel liburing-devel libaio-devel \
+          musl-devel range-v3 nlohmann_json-devel python3
+
+        build_dwarfs=true ./create-utils.sh
+        mkdir dist
+        mv ./*.tar.gz dist/
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: Utils
+        path: 'dist'
+        
+  release:
+      needs: [build]
+      permissions: write-all
+      runs-on: ubuntu-latest
+
+      steps:
+        - uses: actions/download-artifact@v8.0.1
+          with:
+            name: Utils
+
+        - name: release
+          uses: marvinpinto/action-automatic-releases@latest
+          with:
+            title: Utils
+            automatic_release_tag: utils
+            prerelease: true
+            draft: false
+            files: |
+              utils_dwarfs.tar.gz
+            repo_token: ${{ secrets.GITHUB_TOKEN }}

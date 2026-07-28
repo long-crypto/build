@@ -62,12 +62,13 @@ bootstrap_opensuse() {
 
 chroot_setup() {
 	echo '== setting up chroot bind mounts'
+	mkdir -p "$ROOTFS_DIR/dev/pts" "$ROOTFS_DIR/etc"
 	sudo mount --bind /dev "$ROOTFS_DIR/dev"
 	sudo mount --bind /dev/pts "$ROOTFS_DIR/dev/pts"
 	sudo mount --bind /proc "$ROOTFS_DIR/proc"
 	sudo mount --bind /sys "$ROOTFS_DIR/sys"
 	sudo mount --bind /run "$ROOTFS_DIR/run"
-	cp /etc/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
+	sudo cp /etc/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
 }
 
 chroot_teardown() {

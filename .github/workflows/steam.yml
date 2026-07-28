@@ -235,6 +235,7 @@ jobs:
           VERSION="tumbleweed-$(date +%Y%m%d)"
           OUTPUT="Steam-${VERSION}-${ARCH}.AppImage"
 
+          export ARCH
           appimagetool --appimage-extract-and-run \
             "$APPDIR" \
             "/output/${OUTPUT}"

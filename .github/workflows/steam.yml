@@ -1,0 +1,192 @@
+name: Build Steam AppImage (openSUSE Tumbleweed)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: opensuse/tumbleweed
+      options: --privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install --no-recommends \
+            curl wget gzip tar xz file findutils \
+            desktop-file-utils \
+            fuse fuse3-libs \
+            Mesa-libGL1 Mesa-libEGL1 \
+            libX11-6 libXext6 libXfixes3 libXcursor1 libXrandr2 \
+            libXinerama1 libXi6 libXxf86vm1 libXScrnSaver \
+            libxcb1 libxcb-dri3-0 \
+            gtk3 python3 \
+            git
+
+      - name: Install 32-bit graphics libs (optional)
+        run: |
+          zypper --non-interactive install --no-recommends \
+            Mesa-libGL1-32bit Mesa-libEGL1-32bit \
+            libX11-6-32bit libXext6-32bit || true
+
+      - name: Install Steam package
+        run: |
+          zypper --non-interactive addrepo --refresh \
+            https://download.opensuse.org/tumbleweed/repo/non-oss/ non-oss || true
+          zypper --non-interactive refresh
+          zypper --non-interactive install --no-recommends steam
+
+      - name: Download appimagetool
+        run: |
+          arch="$(uname -m)"
+          mkdir -p /opt/appimage
+          curl -fsSL -o /opt/appimage/appimagetool \
+            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${arch}.AppImage"
+          chmod +x /opt/appimage/appimagetool
+          echo "/opt/appimage" >> "$GITHUB_PATH"
+
+      - name: Prepare AppDir
+        run: |
+          set -e
+          APPDIR="$GITHUB_WORKSPACE/Steam.AppDir"
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR"/usr/{bin,lib,lib64,share}
+          mkdir -p "$APPDIR/usr/share/applications"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "$APPDIR/usr/share/metainfo"
+
+          # Steam launcher + support files
+          cp -a /usr/bin/steam "$APPDIR/usr/bin/"
+          cp -a /usr/lib/steam/  "$APPDIR/usr/lib/steam/"  2>/dev/null || true
+          cp -a /usr/share/steam/ "$APPDIR/usr/share/steam/" 2>/dev/null || true
+
+          # Helper: bundle a shared library
+          bundle() {
+            local src="$1"
+            if [ -f "$src" ]; then
+              cp -aL "$src" "$APPDIR/usr/lib64/" 2>/dev/null || true
+            fi
+          }
+
+          # Core system libs
+          for lib in \
+            /lib64/ld-linux-x86-64.so.2 \
+            /lib64/libc.so.6 \
+            /lib64/libm.so.6 \
+            /lib64/libdl.so.2 \
+            /lib64/libpthread.so.0 \
+            /lib64/librt.so.1 \
+            /lib64/libresolv.so.2 \
+            /lib64/libz.so.1 \
+            /lib64/libbz2.so.1 \
+            /usr/lib64/libstdc++.so.6 \
+            /usr/lib64/libgcc_s.so.1 ; do
+            bundle "$lib"
+          done
+
+          # Python (steam uses Python internally)
+          bundle /usr/lib64/libpython3.*.so.1.0 2>/dev/null || true
+
+          # X11 + GL (needed for login UI)
+          for lib in libX11 libXext libXfixes libXcursor libXrandr \
+                     libXinerama libXi libXxf86vm libxcb libGL libEGL; do
+            bundle "/usr/lib64/${lib}.so.1" 2>/dev/null || true
+            bundle "/usr/lib64/${lib}.so.6" 2>/dev/null || true
+          done
+
+          # ── Desktop entry ──
+          cat > "$APPDIR/usr/share/applications/steam.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Name=Steam
+          Comment=Application for managing and playing games on Steam
+          Exec=steam %U
+          Icon=steam
+          Terminal=false
+          Type=Application
+          Categories=Game;
+          MimeType=x-scheme-handler/steam;
+          DESKTOP
+
+          # ── Icon ──
+          if [ -f /usr/share/icons/hicolor/256x256/apps/steam.png ]; then
+            cp /usr/share/icons/hicolor/256x256/apps/steam.png \
+              "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
+          else
+            curl -fsSL -o "$APPDIR/usr/share/icons/hicolor/256x256/apps/steam.png" \
+              "https://upload.wikimedia.org/wikipedia/commons/c/c7/Steam_icon_logo.svg.png"
+          fi
+          ln -sf usr/share/icons/hicolor/256x256/apps/steam.png "$APPDIR/steam.png"
+
+          # ── AppRun ──
+          cat > "$APPDIR/AppRun" << 'APPRUN'
+          #!/bin/bash
+          set -e
+          SELF="$(readlink -f "$0")"
+          HERE="$(dirname "$SELF")"
+
+          export APPDIR_LIBRARY_PATH="${HERE}/usr/lib64:${HERE}/usr/lib:${APPDIR_LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}:${LD_LIBRARY_PATH}"
+          export PATH="${HERE}/usr/bin:${HERE}/usr/games:${PATH}"
+          export STEAMSCRIPT="${HERE}/usr/bin/steam"
+
+          exec "${HERE}/usr/bin/steam" "$@"
+          APPRUN
+          chmod +x "$APPDIR/AppRun"
+
+          # ── AppStream metadata ──
+          cat > "$APPDIR/usr/share/metainfo/steam.appdata.xml" << 'META'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>com.valvesoftware.steam</id>
+            <name>Steam</name>
+            <summary>Digital game distribution platform</summary>
+            <metadata_license>CC0-1.0</metadata_license>
+            <project_license>LicenseRef-proprietary</project_license>
+            <url type="homepage">https://store.steampowered.com</url>
+            <launchable type="desktop-id">steam.desktop</launchable>
+          </component>
+          META
+
+          echo "AppDir ready at $APPDIR"
+
+      - name: Build AppImage
+        run: |
+          ARCH="$(uname -m)"
+          VERSION="tumbleweed-$(date +%Y%m%d)"
+          OUTPUT="Steam-${VERSION}-${ARCH}.AppImage"
+
+          cd "$GITHUB_WORKSPACE"
+
+          # appimagetool without FUSE (extract mode)
+          appimagetool --appimage-extract-and-run \
+            Steam.AppDir \
+            "$OUTPUT"
+
+          chmod +x "$OUTPUT"
+          ls -lh "$OUTPUT"
+          file "$OUTPUT"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: Steam-AppImage
+          path: Steam-*.AppImage
+          retention-days: 30
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Steam-*.AppImage
+          generate_release_notes: true

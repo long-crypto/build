@@ -29,7 +29,7 @@ jobs:
             fuse fuse3-libs \
             Mesa-libGL1 Mesa-libEGL1 \
             libX11-6 libXext6 libXfixes3 libXcursor1 libXrandr2 \
-            libXinerama1 libXi6 libXxf86vm1 libXScrnSaver \
+            libXinerama1 libXi6 libXxf86vm1 libxcb-screensaver0 \
             libxcb1 libxcb-dri3-0 \
             gtk3 python3 \
             git

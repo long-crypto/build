@@ -31,7 +31,7 @@ jobs:
           echo "==> Installing build deps ..."
           zypper --non-interactive install --no-recommends \
             curl wget gzip tar xz file findutils \
-            desktop-file-utils \
+            desktop-file-utils patchelf \
             Mesa-libGL1 Mesa-libEGL1 
 
           echo "==> Installing 32-bit libs (required by Steam client) ..."
@@ -71,6 +71,30 @@ jobs:
           cp -a /usr/bin/steam "$APPDIR/usr/bin/"
           cp -a /usr/lib/steam/  "$APPDIR/usr/lib/steam/"  2>/dev/null || true
           cp -a /usr/share/steam/ "$APPDIR/usr/share/steam/" 2>/dev/null || true
+
+          # Bundle patchelf for 32-bit interpreter fixup at runtime
+          cp -a /usr/bin/patchelf "$APPDIR/usr/bin/"
+
+          # Custom steam launcher: patches 32-bit client interpretter if needed
+          cat > "$APPDIR/usr/bin/steam" << 'LAUNCHER'
+          #!/bin/bash
+          SELF="$(readlink -f "$0")"
+          HERE="$(dirname "$(dirname "$SELF")")"
+
+          if [ ! -e /lib/ld-linux.so.2 ] && [ -e "${HERE}/lib/ld-linux.so.2" ]; then
+            STEAM32="${HOME}/.steam/root/ubuntu12_32/steam"
+            MARKER="${HOME}/.steam/.appimage_patched"
+            if [ -f "$STEAM32" ] && [ ! -f "$MARKER" ]; then
+              echo "==> Patching 32-bit Steam client interpreter..."
+              "${HERE}/usr/bin/patchelf" --set-interpreter "${HERE}/lib/ld-linux.so.2" "$STEAM32" \
+                && touch "$MARKER" || true
+            fi
+          fi
+          exec /usr/lib/steam/steam "$@"  2>/dev/null || \
+          exec /usr/lib/steam/bin_steam.sh "$@"  2>/dev/null || \
+          exec /usr/lib/steam/steam_wrapper "$@"
+          LAUNCHER
+          chmod +x "$APPDIR/usr/bin/steam"
 
           bundle() {
             local src="$1"
@@ -138,9 +162,9 @@ jobs:
           for lib in libpulse libasound libdbus-1 libpng16 libfreetype; do
             bundle32 "/usr/lib/${lib}.so.0" 2>/dev/null || true
           done
-          # Create ld-linux.so.2 at conventional location so 32-bit ELFs find it
+          # Create ld-linux.so.2 at conventional location (real copy, not symlink)
           mkdir -p "$APPDIR/lib"
-          ln -sf ../usr/lib32/ld-linux.so.2 "$APPDIR/lib/ld-linux.so.2"
+          cp "$APPDIR/usr/lib32/ld-linux.so.2" "$APPDIR/lib/ld-linux.so.2"
 
           # Desktop entry
           cat > "$APPDIR/usr/share/applications/steam.desktop" << EOF
@@ -189,26 +213,22 @@ jobs:
           export LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}:${LD_LIBRARY_PATH}"
           export PATH="${HERE}/usr/bin:${HERE}/usr/games:${PATH}"
 
-          # If host lacks 32-bit /lib/ld-linux.so.2, set up a private
-          # mount namespace with our bundled 32-bit interpreter.
+          # If host lacks 32-bit /lib/ld-linux.so.2, try namespace mount;
+          # otherwise fall back to patchelf in our custom steam launcher.
           if [ ! -e /lib/ld-linux.so.2 ] && [ -e "${HERE}/lib/ld-linux.so.2" ]; then
             if command -v unshare >/dev/null 2>&1; then
-              echo "==> Host lacks 32-bit glibc; enabling bundled fallback (user namespace)..."
-              exec unshare --user --map-root-user --mount --propagation private -- \
+              echo "==> Host lacks 32-bit glibc; enabling via user namespace..."
+              exec unshare --user --map-root-user --mount --fork -- \
                 sh -c '
                   set -e
                   mkdir -p /lib
                   mount --bind "${1}/lib/ld-linux.so.2" /lib/ld-linux.so.2
                   shift
                   exec "$@"
-                ' _ "${HERE}" "${HERE}/usr/bin/steam" "$@"
+                ' _ "${HERE}" "${HERE}/usr/bin/steam" "$@" 2>/dev/null
+              # If unshare fails, fall through to patchelf-based approach
             fi
-            echo "ERROR: 32-bit glibc not found and unshare not available."
-            echo "Install glibc-32bit (or equivalent) on your host:"
-            echo "  openSUSE:  sudo zypper install glibc-32bit"
-            echo "  Debian/Ubuntu:  sudo apt install libc6:i386"
-            echo "  Fedora:  sudo dnf install glibc.i686"
-            exit 1
+            echo "NOTE: 32-bit glibc missing — will use patchelf fallback."
           fi
 
           exec "${HERE}/usr/bin/steam" "$@"

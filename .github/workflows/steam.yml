@@ -32,7 +32,7 @@ jobs:
           zypper --non-interactive install --no-recommends \
             curl wget gzip tar xz file findutils \
             desktop-file-utils \
-            fuse fuse3-libs \
+            fuse \
             Mesa-libGL1 Mesa-libEGL1 
 
           echo "==> Installing 32-bit libs (best effort) ..."

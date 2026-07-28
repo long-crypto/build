@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - 'opensuse-appimage.sh'
-      - '.github/workflows/steam.yml'
+      - '.github/workflows/build.yml'
   schedule:
     - cron: '0 6 * * 0'  # Weekly rebuild
 
@@ -20,15 +20,23 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq bubblewrap curl squashfs-tools xz-utils zstd
-          
+
       - name: Cache openSUSE rootfs
         uses: actions/cache@v4
-        id: cache
+        id: cache-rootfs
         with:
           path: ~/.local/share/steam-appimage-opensuse/rootfs
           key: steam-opensuse-tw-${{ runner.os }}-${{ hashFiles('opensuse-appimage.sh') }}
           restore-keys: |
             steam-opensuse-tw-${{ runner.os }}-
+
+      - name: Cache appimagetool
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/steam-appimage-opensuse/tools
+          key: appimagetool-${{ runner.os }}-v1
+          restore-keys: |
+            appimagetool-${{ runner.os }}-
 
       - name: Setup Steam
         run: |

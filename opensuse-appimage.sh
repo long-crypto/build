@@ -25,10 +25,10 @@ step()  { echo -e "${C}[..]${N}  $*"; }
 
 check_host_deps() {
     local miss=()
-    for d in bwrap curl tar zstd xz; do
+    for d in bwrap curl tar xz; do
         command -v "$d" &>/dev/null || miss+=("$d")
     done
-    command -v mksquashfs &>/dev/null && export HAS_SQUASHFS=true || { export HAS_SQUASHFS=false; miss+=("mksquashfs"); }
+    command -v mksquashfs &>/dev/null && export HAS_SQUASHFS=true || export HAS_SQUASHFS=false
     [ ${#miss[@]} -eq 0 ] && return 0
     err "Missing: ${miss[*]}
   Install with your package manager (e.g. apt/dnf/pacman/zypper)"
@@ -338,32 +338,55 @@ fi
 LAUNCHER
 }
 
-write_squashfs_runtime() {
-    cat << 'RUNTIME'
-#!/usr/bin/env bash
-# SquashFS AppImage runtime
-HERE="$(dirname "$(readlink -f "${0}")")"
-MNT="${TMPDIR:-/tmp}/.steam-appimage-$$"
-cleanup() { fusermount -u "$MNT" 2>/dev/null; rmdir "$MNT" 2>/dev/null; }
-trap cleanup EXIT
-mkdir -p "$MNT"
+# =============================================================================
+# AppImage tooling (ivan-hc approach)
+# =============================================================================
 
-OFFSET=$(awk '/^__END_RUNTIME__$/ {print NR+1; exit}' "$0")
+APPDIR_RUNTIME_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/runtime-x86_64"
+APPIMAGETOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+TOOLDIR="$BASE/tools"
 
-if command -v squashfuse &>/dev/null; then
-    tail -n +"$OFFSET" "$0" | squashfuse "$MNT" -o ro,allow_other
-elif command -v unsquashfs &>/dev/null; then
-    tail -n +"$OFFSET" "$0" > "$MNT.squashfs"
-    unsquashfs -d "$MNT" -f "$MNT.squashfs"
-    rm -f "$MNT.squashfs"
-else
-    echo "ERROR: squashfuse or unsquashfs required to run this AppImage." >&2
-    exit 1
-fi
+ensure_appimagetool() {
+    if command -v appimagetool &>/dev/null; then
+        export APPIMAGETOOL="appimagetool"
+        return 0
+    fi
+    if [ -x "$TOOLDIR/appimagetool" ]; then
+        export APPIMAGETOOL="$TOOLDIR/appimagetool"
+        return 0
+    fi
+    step "Downloading appimagetool..."
+    mkdir -p "$TOOLDIR"
+    curl -fSL --retry 5 --connect-timeout 30 -o "$TOOLDIR/appimagetool.AppImage" "$APPIMAGETOOL_URL" || {
+        warn "Cannot download appimagetool, will use manual method"
+        return 1
+    }
+    chmod +x "$TOOLDIR/appimagetool.AppImage"
+    cd "$TOOLDIR"
+    ./appimagetool.AppImage --appimage-extract 2>/dev/null
+    mv squashfs-root appimagetool-squashfs 2>/dev/null || true
+    if [ -x "$TOOLDIR/appimagetool-squashfs/AppRun" ]; then
+        ln -sf appimagetool-squashfs/AppRun appimagetool 2>/dev/null
+        export APPIMAGETOOL="$TOOLDIR/appimagetool"
+        cd - >/dev/null
+        return 0
+    fi
+    cd - >/dev/null
+    warn "appimagetool extraction failed"
+    return 1
+}
 
-exec "$MNT/AppRun" "$@"
-__END_RUNTIME__
-RUNTIME
+ensure_runtime() {
+    if [ -f "$TOOLDIR/runtime-x86_64" ]; then
+        return 0
+    fi
+    step "Downloading AppImage runtime..."
+    mkdir -p "$TOOLDIR"
+    curl -fSL --retry 5 --connect-timeout 30 -o "$TOOLDIR/runtime-x86_64" "$APPDIR_RUNTIME_URL" || {
+        warn "Cannot download runtime"
+        return 1
+    }
+    chmod +x "$TOOLDIR/runtime-x86_64"
 }
 
 # =============================================================================
@@ -417,32 +440,38 @@ EOF
     # Build
     step "Packaging..."
 
-    if [ "${HAS_SQUASHFS:-false}" = true ]; then
-        if command -v appimagetool &>/dev/null; then
-            ARCH=x86_64 appimagetool "$bdir/AppDir" "$output" 2>/dev/null || {
-                info "appimagetool failed, using mksquashfs..."
-                mksquashfs "$bdir/AppDir" "$bdir/fs.squashfs" -comp zstd -Xcompression-level 19 -noappend
-                write_squashfs_runtime > "$output"
-                chmod +x "$output"
-                cat "$bdir/fs.squashfs" >> "$output"
-                rm -f "$bdir/fs.squashfs"
-            }
-        else
-            mksquashfs "$bdir/AppDir" "$bdir/fs.squashfs" -comp zstd -Xcompression-level 19 -noappend
-            write_squashfs_runtime > "$output"
-            chmod +x "$output"
-            cat "$bdir/fs.squashfs" >> "$output"
-            rm -f "$bdir/fs.squashfs"
-        fi
+    # Method 1: appimagetool (official C runtime, FUSE mount)
+    if ensure_appimagetool; then
+        info "Using appimagetool..."
+        ARCH=x86_64 "$APPIMAGETOOL" "$bdir/AppDir" "$output" 2>/dev/null && [ -f "$output" ] && {
+            chmod -R u+w "$bdir" 2>/dev/null; rm -rf "$bdir"
+            info "Done: $output"
+            ls -lh "$output"
+            echo -e "  Run: ${G}./$output${N}"
+            return 0
+        }
+        warn "appimagetool failed, trying manual method..."
+    fi
+
+    # Method 2: Manual mksquashfs + runtime binary
+    if command -v mksquashfs &>/dev/null && ensure_runtime; then
+        info "Using mksquashfs + runtime..."
+        mksquashfs "$bdir/AppDir" "$bdir/fs.squashfs" -comp zstd -Xcompression-level 19 -noappend 2>/dev/null
+        cat "$TOOLDIR/runtime-x86_64" > "$output"
+        cat "$bdir/fs.squashfs" >> "$output"
+        chmod +x "$output"
+        rm -f "$bdir/fs.squashfs"
     else
-        warn "No mksquashfs, creating self-extracting tar..."
+        # Method 3: Self-extracting tar (zero runtime deps)
+        info "Using self-extracting tar..."
         {
             echo '#!/bin/bash'
+            echo 'set -e'
             echo 'D="$(mktemp -d)"'
-            echo 'trap "rm -rf $D" EXIT'
+            echo 'trap "rm -rf \"\$D\"" EXIT'
             echo 'mkdir -p "$D"'
-            echo 'ARCHIVE_START=$(awk "/^__ARCHIVE__$/ {print NR+1; exit}" "$0")'
-            echo 'tail -n +$ARCHIVE_START "$0" | tar xJ -C "$D"'
+            echo "OFFSET=\$(awk '/^__ARCHIVE__\$/ {print NR+1; exit}' \"\$0\")"
+            echo 'tail -n +$OFFSET "$0" | tar xJ -C "$D"'
             echo 'exec "$D/AppRun" "$@"'
             echo '__ARCHIVE__'
             tar cJ -C "$bdir/AppDir" .

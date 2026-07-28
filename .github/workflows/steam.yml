@@ -32,7 +32,7 @@ jobs:
           zypper --non-interactive install --no-recommends \
             curl wget gzip tar xz file findutils \
             desktop-file-utils patchelf \
-            Mesa-libGL1 Mesa-libEGL1 
+            Mesa-libGL1 Mesa-libEGL1
 
           echo "==> Installing 32-bit libs (required by Steam client) ..."
           zypper --non-interactive install --no-recommends \
@@ -212,24 +212,6 @@ jobs:
           export APPDIR_LIBRARY_PATH="${HERE}/usr/lib64:${HERE}/usr/lib32:${HERE}/usr/lib:${APPDIR_LIBRARY_PATH}"
           export LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}:${LD_LIBRARY_PATH}"
           export PATH="${HERE}/usr/bin:${HERE}/usr/games:${PATH}"
-
-          # If host lacks 32-bit /lib/ld-linux.so.2, try namespace mount;
-          # otherwise fall back to patchelf in our custom steam launcher.
-          if [ ! -e /lib/ld-linux.so.2 ] && [ -e "${HERE}/lib/ld-linux.so.2" ]; then
-            if command -v unshare >/dev/null 2>&1; then
-              echo "==> Host lacks 32-bit glibc; enabling via user namespace..."
-              exec unshare --user --map-root-user --mount --fork -- \
-                sh -c '
-                  set -e
-                  mkdir -p /lib
-                  mount --bind "${1}/lib/ld-linux.so.2" /lib/ld-linux.so.2
-                  shift
-                  exec "$@"
-                ' _ "${HERE}" "${HERE}/usr/bin/steam" "$@" 2>/dev/null
-              # If unshare fails, fall through to patchelf-based approach
-            fi
-            echo "NOTE: 32-bit glibc missing — will use patchelf fallback."
-          fi
 
           exec "${HERE}/usr/bin/steam" "$@"
           APPRUN

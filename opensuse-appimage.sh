@@ -46,32 +46,73 @@ download_rootfs() {
 
     step "Downloading openSUSE Tumbleweed container..."
 
-    local url="https://download.opensuse.org/tumbleweed/appliances/opensuse-tumbleweed-container.x86_64.tar.xz"
     local tmp="$BASE/rootfs.tar"
 
-    curl -fSL --retry 5 --connect-timeout 30 --progress-bar -o "$tmp.xz" "$url" || {
-        warn "Primary URL failed, trying Docker Hub..."
-        local m
-        m=$(curl -fsSL \
-            "https://registry.hub.docker.com/v2/library/opensuse/tumbleweed/manifests/latest" \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" 2>/dev/null || true)
-        [ -z "$m" ] && err "Cannot download openSUSE image."
-        local d=$(echo "$m" | python3 -c "import sys,json; print(json.load(sys.stdin)['layers'][0]['digest'])" 2>/dev/null || \
-                   echo "$m" | jq -r '.layers[0].digest')
-        curl -fsSL --retry 5 -o "$tmp.gz" \
-            "https://registry.hub.docker.com/v2/library/opensuse/tumbleweed/blobs/$d" || err "Download failed"
-        zstd -d "$tmp.gz" -o "$tmp" 2>/dev/null || gunzip "$tmp.gz" -c > "$tmp" 2>/dev/null || err "Decompress failed"
-    }
-
-    if [ -f "$tmp.xz" ]; then
-        xz -d "$tmp.xz" -c > "$tmp"
+    # Method 1: Docker / Podman (most reliable)
+    if command -v docker &>/dev/null; then
+        info "Using Docker..."
+        docker pull opensuse/tumbleweed 2>&1 | tail -3
+        local cid
+        cid=$(docker create opensuse/tumbleweed)
+        docker export "$cid" | tar xC "$dst" --exclude='dev/*' --exclude='proc/*' --exclude='sys/*'
+        docker rm "$cid" >/dev/null
+        mkdir -p "$dst/dev" "$dst/proc" "$dst/sys"
+        [ -f "$dst/etc/os-release" ] && return 0
+        warn "Docker export failed, trying alternative..."
     fi
 
-    step "Extracting rootfs..."
+    if command -v podman &>/dev/null; then
+        info "Using Podman..."
+        podman pull opensuse/tumbleweed 2>&1 | tail -3
+        local cid
+        cid=$(podman create opensuse/tumbleweed)
+        podman export "$cid" | tar xC "$dst"
+        podman rm "$cid" >/dev/null
+        [ -f "$dst/etc/os-release" ] && return 0
+        warn "Podman export failed, trying alternative..."
+    fi
+
+    # Method 2: Direct download from openSUSE registry
+    info "Trying direct download from openSUSE registry..."
+    local reg_url="https://registry.opensuse.org/cgi-bin/co/container/opensuse/tumbleweed/latest"
+    curl -fSL --retry 5 --connect-timeout 30 --progress-bar -o "$tmp.gz" "$reg_url" 2>/dev/null && {
+        gunzip -c "$tmp.gz" > "$tmp" 2>/dev/null || zstd -d "$tmp.gz" -o "$tmp" 2>/dev/null || {
+            warn "Decompress failed, trying tar directly..."
+            mv "$tmp.gz" "$tmp"
+        }
+        rm -rf "$dst"
+        mkdir -p "$dst"
+        tar xf "$tmp" -C "$dst" 2>/dev/null && rm -f "$tmp" "$tmp.gz" && {
+            [ -f "$dst/etc/os-release" ] && return 0
+        }
+        warn "Registry download failed, trying Docker Hub API..."
+    }
+
+    # Method 3: Docker Hub registry API (no-docker fallback)
+    local token
+    token=$(curl -fsSL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/opensuse:pull" 2>/dev/null | \
+            sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    [ -z "$token" ] && err "Cannot authenticate with Docker Hub."
+
+    local manifest digest blobs_url
+    manifest=$(curl -fsSL \
+        "https://registry-1.docker.io/v2/library/opensuse/tumbleweed/manifests/latest" \
+        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+        -H "Authorization: Bearer $token" 2>/dev/null || true)
+    [ -z "$manifest" ] && err "Cannot fetch manifest from Docker Hub."
+
+    digest=$(echo "$manifest" | sed -n 's/.*"digest":"\(sha256:[^"]*\)".*/\1/p' | head -1)
+    [ -z "$digest" ] && err "Cannot parse layer digest."
+    blobs_url="https://registry-1.docker.io/v2/library/opensuse/tumbleweed/blobs/$digest"
+
+    curl -fsSL --retry 5 -o "$tmp.gz" -H "Authorization: Bearer $token" "$blobs_url" || err "Download failed"
+
+    gunzip -c "$tmp.gz" > "$tmp" 2>/dev/null || zstd -d "$tmp.gz" -o "$tmp" 2>/dev/null || err "Decompress failed"
+
     rm -rf "$dst"
     mkdir -p "$dst"
     tar xf "$tmp" -C "$dst"
-    rm -f "$tmp" "$tmp.xz" "$tmp.gz" "$tmp.zst"
+    rm -f "$tmp" "$tmp.gz" "$tmp.zst"
 
     [ -f "$dst/etc/os-release" ] || err "Rootfs extraction failed."
     info "Rootfs: $(grep PRETTY_NAME "$dst/etc/os-release" | cut -d= -f2 | tr -d '"')"

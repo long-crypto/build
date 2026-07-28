@@ -28,7 +28,14 @@ ensure_zypper() {
 bootstrap_opensuse() {
 	echo '== bootstrapping openSUSE Tumbleweed rootfs'
 	rm -rf "$ROOTFS_DIR"
-	mkdir -p "$ROOTFS_DIR"/{dev,proc,sys,run,tmp,var/cache/zypp}
+	mkdir -p "$ROOTFS_DIR"/{dev,proc,sys,run,tmp,var/cache/zypp,etc/zypp/repos.d}
+
+	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys addrepo --refresh \
+		"https://download.opensuse.org/tumbleweed/repo/oss/" tumbleweed-oss
+	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys addrepo --refresh \
+		"https://download.opensuse.org/tumbleweed/repo/non-oss/" tumbleweed-non-oss
+	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys addrepo --refresh \
+		"https://download.opensuse.org/update/tumbleweed/" tumbleweed-update
 
 	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys refresh
 	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys install --no-recommends \

@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - 'opensuse-appimage.sh'
-      - '.github/workflows/build.yml'
+      - '.github/workflows/steam.yml'
   schedule:
     - cron: '0 6 * * 0'  # Weekly rebuild
 

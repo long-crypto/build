@@ -1,272 +1,62 @@
-name: Build Steam AppImage (openSUSE Tumbleweed)
+name: Build Steam AppImage
 
 on:
-  push:
-    branches: [main, master]
-    tags: ['v*']
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
+  push:
+    paths:
+      - 'opensuse-appimage.sh'
+      - '.github/workflows/build.yml'
   schedule:
-    - cron: '0 8 * * 1'
+    - cron: '0 6 * * 0'  # Weekly rebuild
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 90
     steps:
-      - name: Pull openSUSE image & build Steam AppImage
+      - uses: actions/checkout@v4
+
+      - name: Install host dependencies
         run: |
-          set -e
-          IMAGE="registry.opensuse.org/opensuse/tumbleweed:latest"
-          echo "==> Pulling $IMAGE"
-          docker pull "$IMAGE"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap curl squashfs-tools xz-utils
 
-          BUILD_SCRIPT='
-          set -e
+      - name: Cache openSUSE rootfs
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: ~/.local/share/steam-appimage-opensuse/rootfs
+          key: steam-opensuse-tw-${{ runner.os }}-${{ hashFiles('opensuse-appimage.sh') }}
+          restore-keys: |
+            steam-opensuse-tw-${{ runner.os }}-
 
-          echo "==> Refreshing repos ..."
-          zypper --non-interactive --gpg-auto-import-keys refresh
-
-          echo "==> Installing build deps ..."
-          zypper --non-interactive install --no-recommends \
-            curl wget gzip tar xz file findutils \
-            desktop-file-utils patchelf \
-            Mesa-libGL1 Mesa-libEGL1
-
-          echo "==> Installing 32-bit libs (required by Steam client) ..."
-          zypper --non-interactive install --no-recommends \
-            glibc-32bit glibc-locale-base-32bit \
-            libstdc++6-32bit libgcc_s1-32bit \
-            libX11-6-32bit libXext6-32bit libXfixes3-32bit \
-            libXcursor1-32bit libXrandr2-32bit libXi6-32bit \
-            libXinerama1-32bit libXxf86vm1-32bit \
-            libxcb1-32bit libxcb-dri3-0-32bit \
-            Mesa-libGL1-32bit Mesa-libEGL1-32bit \
-            libpng16-16-32bit libfreetype6-32bit \
-            libpulse0-32bit libasound2-32bit \
-            libdbus-1-3-32bit || true
-
-          echo "==> Adding non-oss repo & installing steam ..."
-          zypper --non-interactive addrepo --refresh \
-            https://download.opensuse.org/tumbleweed/repo/non-oss/ non-oss || true
-          zypper --non-interactive refresh
-          zypper --non-interactive install --no-recommends steam
-
-          echo "==> Downloading appimagetool ..."
-          ARCH="$(uname -m)"
-          mkdir -p /opt/appimage
-          curl -fsSL -o /opt/appimage/appimagetool \
-            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${ARCH}.AppImage"
-          chmod +x /opt/appimage/appimagetool
-          export PATH="/opt/appimage:${PATH}"
-
-          echo "==> Building AppDir ..."
-          APPDIR="/build/Steam.AppDir"
-          rm -rf "$APPDIR"
-          mkdir -p "$APPDIR"/usr/{bin,lib,lib64,share}
-          mkdir -p "$APPDIR/usr/share"/{applications,metainfo}
-          mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-
-          cp -a /usr/bin/steam "$APPDIR/usr/bin/"
-          cp -a /usr/lib/steam/  "$APPDIR/usr/lib/steam/"  2>/dev/null || true
-          cp -a /usr/share/steam/ "$APPDIR/usr/share/steam/" 2>/dev/null || true
-
-          # Bundle patchelf for 32-bit interpreter fixup at runtime
-          cp -a /usr/bin/patchelf "$APPDIR/usr/bin/"
-
-          # Custom steam launcher: patches 32-bit client interpretter if needed
-          cat > "$APPDIR/usr/bin/steam" << 'LAUNCHER'
-          #!/bin/bash
-          SELF="$(readlink -f "$0")"
-          HERE="$(dirname "$(dirname "$SELF")")"
-
-          if [ ! -e /lib/ld-linux.so.2 ] && [ -e "${HERE}/lib/ld-linux.so.2" ]; then
-            STEAM32="${HOME}/.steam/root/ubuntu12_32/steam"
-            MARKER="${HOME}/.steam/.appimage_patched"
-            if [ -f "$STEAM32" ] && [ ! -f "$MARKER" ]; then
-              echo "==> Patching 32-bit Steam client interpreter..."
-              "${HERE}/usr/bin/patchelf" --set-interpreter "${HERE}/lib/ld-linux.so.2" "$STEAM32" \
-                && touch "$MARKER" || true
-            fi
-          fi
-          exec /usr/lib/steam/steam "$@"  2>/dev/null || \
-          exec /usr/lib/steam/bin_steam.sh "$@"  2>/dev/null || \
-          exec /usr/lib/steam/steam_wrapper "$@"
-          LAUNCHER
-          chmod +x "$APPDIR/usr/bin/steam"
-
-          bundle() {
-            local src="$1"
-            if [ -f "$src" ]; then
-              cp -aL "$src" "$APPDIR/usr/lib64/" 2>/dev/null || true
-            fi
-          }
-
-          for lib in \
-            /lib64/ld-linux-x86-64.so.2 \
-            /lib64/libc.so.6 \
-            /lib64/libm.so.6 \
-            /lib64/libdl.so.2 \
-            /lib64/libpthread.so.0 \
-            /lib64/librt.so.1 \
-            /lib64/libresolv.so.2 \
-            /lib64/libz.so.1 \
-            /lib64/libbz2.so.1 \
-            /usr/lib64/libstdc++.so.6 \
-            /usr/lib64/libgcc_s.so.1 ; do
-            bundle "$lib"
-          done
-
-          bundle /usr/lib64/libpython3.*.so.1.0 2>/dev/null || true
-
-          for lib in libX11 libXext libXfixes libXcursor libXrandr \
-                     libXinerama libXi libXxf86vm libxcb libGL libEGL; do
-            for ext in 1 6; do
-              bundle "/usr/lib64/${lib}.so.${ext}" 2>/dev/null || true
-            done
-          done
-
-          echo "==> Bundling 32-bit libs (needed by Steam client) ..."
-          mkdir -p "$APPDIR/usr/lib32"
-          bundle32() {
-            local src="$1"
-            if [ -f "$src" ]; then
-              cp -aL "$src" "$APPDIR/usr/lib32/" 2>/dev/null || true
-            fi
-          }
-          # 32-bit dynamic linker (interpreter for 32-bit ELFs)
-          bundle32 /lib/ld-linux.so.2
-          # 32-bit core libs
-          for lib in \
-            /lib/libc.so.6 \
-            /lib/libm.so.6 \
-            /lib/libdl.so.2 \
-            /lib/libpthread.so.0 \
-            /lib/librt.so.1 \
-            /lib/libresolv.so.2 \
-            /lib/libz.so.1 \
-            /lib/libbz2.so.1 \
-            /usr/lib/libstdc++.so.6 \
-            /usr/lib/libgcc_s.so.1 ; do
-            bundle32 "$lib"
-          done
-          # 32-bit X11 + GL
-          for lib in libX11 libXext libXfixes libXcursor libXrandr \
-                     libXinerama libXi libXxf86vm libxcb libGL libEGL; do
-            for ext in 1 6; do
-              bundle32 "/usr/lib/${lib}.so.${ext}" 2>/dev/null || true
-            done
-          done
-          # 32-bit audio + misc
-          for lib in libpulse libasound libdbus-1 libpng16 libfreetype; do
-            bundle32 "/usr/lib/${lib}.so.0" 2>/dev/null || true
-          done
-          # Create ld-linux.so.2 at conventional location (real copy, not symlink)
-          mkdir -p "$APPDIR/lib"
-          cp "$APPDIR/usr/lib32/ld-linux.so.2" "$APPDIR/lib/ld-linux.so.2"
-
-          # Desktop entry
-          cat > "$APPDIR/usr/share/applications/steam.desktop" << EOF
-          [Desktop Entry]
-          Name=Steam
-          Comment=Application for managing and playing games on Steam
-          Exec=steam %U
-          Icon=steam
-          Terminal=false
-          Type=Application
-          Categories=Game;
-          MimeType=x-scheme-handler/steam;
-          EOF
-          # appimagetool requires *.desktop at AppDir root
-          ln -sf usr/share/applications/steam.desktop "$APPDIR/steam.desktop"
-
-          # Icon
-          if [ -f /usr/share/icons/hicolor/256x256/apps/steam.png ]; then
-            cp /usr/share/icons/hicolor/256x256/apps/steam.png \
-              "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
-          else
-            curl -fsSL -o "$APPDIR/usr/share/icons/hicolor/256x256/apps/steam.png" \
-              "https://upload.wikimedia.org/wikipedia/commons/c/c7/Steam_icon_logo.svg.png"
-          fi
-          ln -sf usr/share/icons/hicolor/256x256/apps/steam.png "$APPDIR/steam.png"
-
-          # AppRun
-          cat > "$APPDIR/AppRun" << 'APPRUN'
-          #!/bin/bash
-          set -e
-          SELF="$(readlink -f "$0")"
-          HERE="$(dirname "$SELF")"
-
-          # If running inside an AppImage and FUSE is not available,
-          # re-exec the AppImage in extract-and-run mode.
-          if [ -z "${APPIMAGE_EXTRACT_AND_RUN:-}" ] && [ -n "${APPIMAGE:-}" ]; then
-            if ! command -v fusermount >/dev/null 2>&1 && \
-               ! command -v fusermount3 >/dev/null 2>&1; then
-              echo "==> FUSE not found, switching to extract-and-run mode..."
-              export APPIMAGE_EXTRACT_AND_RUN=1
-              exec "${APPIMAGE}" "$@"
-            fi
-          fi
-
-          export APPDIR_LIBRARY_PATH="${HERE}/usr/lib64:${HERE}/usr/lib32:${HERE}/usr/lib:${APPDIR_LIBRARY_PATH}"
-          export LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}:${LD_LIBRARY_PATH}"
-          export PATH="${HERE}/usr/bin:${HERE}/usr/games:${PATH}"
-
-          exec "${HERE}/usr/bin/steam" "$@"
-          APPRUN
-          chmod +x "$APPDIR/AppRun"
-
-          # AppStream
-          cat > "$APPDIR/usr/share/metainfo/steam.appdata.xml" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <component type="desktop-application">
-            <id>com.valvesoftware.steam</id>
-            <name>Steam</name>
-            <summary>Digital game distribution platform</summary>
-            <metadata_license>CC0-1.0</metadata_license>
-            <project_license>LicenseRef-proprietary</project_license>
-            <url type="homepage">https://store.steampowered.com</url>
-            <launchable type="desktop-id">steam.desktop</launchable>
-          </component>
-          EOF
-
-          echo "==> Packaging AppImage ..."
-          VERSION="tumbleweed-$(date +%Y%m%d)"
-          OUTPUT="Steam-${VERSION}-${ARCH}.AppImage"
-
-          export ARCH
-          appimagetool --appimage-extract-and-run \
-            "$APPDIR" \
-            "/output/${OUTPUT}"
-
-          chmod +x "/output/${OUTPUT}"
-          ls -lh "/output/${OUTPUT}"
-          file "/output/${OUTPUT}"
-          '
-
-          # Run the build inside the openSUSE container
-          docker run --rm \
-            -v "${{ github.workspace }}:/output" \
-            --entrypoint /bin/bash \
-            "$IMAGE" \
-            -c "$BUILD_SCRIPT"
-
-      - name: Verify output
+      - name: Setup Steam
         run: |
-          ls -lh "${{ github.workspace }}"/Steam-*.AppImage
-          echo "==> Build complete!"
+          chmod +x opensuse-appimage.sh
+          ./opensuse-appimage.sh setup
 
-      - name: Upload AppImage
+      - name: Build AppImage
+        run: |
+          OUTPUT="Steam-opensuse-TW-x86_64.AppImage"
+          ./opensuse-appimage.sh build "$OUTPUT"
+          echo "output=$OUTPUT" >> "$GITHUB_OUTPUT"
+        id: build
+
+      - name: Verify
+        run: |
+          file "${{ steps.build.outputs.output }}"
+          ls -lh "${{ steps.build.outputs.output }}"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Steam-AppImage
-          path: Steam-*.AppImage
+          name: Steam-opensuse-AppImage
+          path: ${{ steps.build.outputs.output }}
           retention-days: 30
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Steam-*.AppImage
+          files: ${{ steps.build.outputs.output }}
           generate_release_notes: true

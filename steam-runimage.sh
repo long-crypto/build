@@ -39,14 +39,12 @@ bootstrap_opensuse() {
 
 	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys refresh
 	sudo zypper --root "$ROOTFS_DIR" --non-interactive --gpg-auto-import-keys install --no-recommends \
-		patterns-base-basis \
+		patterns-base-minimal_base \
 		steam \
-		Mesa-libEGL1 Mesa-libGL1 Mesa-libglapi0 \
-		vulkan-tools libvulkan1 vulkan-loader \
+		Mesa-libEGL1 Mesa-libGL1 \
+		vulkan-tools libvulkan1 \
 		libvulkan_intel libvulkan_radeon \
 		pipewire libpipewire-0_3-0 libpulse0 \
-		vkd3d vkd3d-devel \
-		vulkan-mesa-layer \
 		libfreetype6 \
 		libfuse2 \
 		mangohud gamemode \

@@ -8,7 +8,8 @@ export STARTUPWMCLASS=steam
 export UPINFO="gh-releases-zsync|$(echo "$GITHUB_REPOSITORY" | tr '/' '|')|latest|*-$ARCH.AppImage.zsync"
 
 URUNTIME="https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/refs/heads/main/useful-tools/uruntime2appimage.sh"
-
+sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns <<<0 
+sudo tee /etc/sysctl.d/98-apparmor-unuserns.conf <<<kernel.apparmor_restrict_unprivileged_userns=0
 # An example of steam packaging in a RunImage container
 
 if [ ! -x 'runimage' ]; then

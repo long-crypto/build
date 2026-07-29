@@ -30,6 +30,8 @@ run_install() {
 	)
 
 	echo '== checking for updates'
+	sudo tee /etc/sysctl.d/98-apparmor-unuserns.conf <<<kernel.apparmor_restrict_unprivileged_userns=0
+    sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns <<<0 
 	zypper --non-interactive refresh
 
 	echo '== install packages'

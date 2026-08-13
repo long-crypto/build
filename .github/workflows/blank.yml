@@ -176,7 +176,7 @@ jobs:
         run: |
           zypper -n refresh
           zypper -n install --no-recommends \
-            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar
+            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar nasm
             
       - name: Configure&build
         if: ${{ inputs.target == 'ffmpeg' }}

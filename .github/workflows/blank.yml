@@ -169,3 +169,26 @@ jobs:
         with:
          name: wl-clipboard
          path: ./wl-clipboard
+
+      - name: Install build dependencies
+        if: ${{ inputs.target == 'ffmpeg' }}
+        run: |
+          zypper -n refresh
+          zypper -n install --no-recommends \
+            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar
+            
+      - name: Configure&build
+        if: ${{ inputs.target == 'ffmpeg' }}
+        run: |
+           curl -o ffmpeg-9.0.1.tar.xz -L https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
+           tar -xvf ffmpeg-9.0.1.tar.xz
+           cd ffmpeg-9.0.1
+           ./configure --disable-static --enable-shared
+           make -j
+
+      - name: Upload artifacts
+        if: ${{ inputs.target == 'ffmpeg' }}
+        uses: actions/upload-artifact@v4
+        with:
+         name: ffmpeg
+         path: ./ffmpeg-9.0.1

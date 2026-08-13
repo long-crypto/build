@@ -14,6 +14,7 @@ on:
           - foot
           - git
           - wl-clipboard
+          - ffmpeg
 
 jobs:
   build:

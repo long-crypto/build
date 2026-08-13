@@ -174,9 +174,10 @@ jobs:
       - name: Install build dependencies
         if: ${{ inputs.target == 'ffmpeg' }}
         run: |
+          sudo zypper ar -cfp 90 'https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Tumbleweed/' packman
           zypper -n refresh
           zypper -n install --no-recommends \
-            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar nasm
+            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar nasm libx264-devel libx265-devel
             
       - name: Configure&build
         if: ${{ inputs.target == 'ffmpeg' }}

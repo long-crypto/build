@@ -175,7 +175,7 @@ jobs:
         if: ${{ inputs.target == 'ffmpeg' }}
         run: |
           zypper ar -cfp 90 'https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Tumbleweed/' packman
-          zypper -n refresh <<< $'t\n'
+          zypper refresh -t
           zypper -n install --no-recommends \
             gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar nasm libx264-devel libx265-devel
             

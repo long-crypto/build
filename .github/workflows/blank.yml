@@ -174,14 +174,25 @@ jobs:
       - name: Install build dependencies
         if: ${{ inputs.target == 'ffmpeg' }}
         run: |
-          zypper ar -cfp 90 'https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Tumbleweed/' packman
-          zypper refresh -y
+          zypper -n refresh
           zypper -n install --no-recommends \
-            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar nasm libx264-devel libx265-devel
+            gcc gcc-c++ make cmake git pkg-config alsa-devel curl tar nasm
             
       - name: Configure&build
         if: ${{ inputs.target == 'ffmpeg' }}
         run: |
+           git clone https://code.videolan.org/videolan/x264.git
+           cd x264
+           ./configure --disable-shared --enable-static
+           make -j
+           make install
+           cd ..
+           git clone https://bitbucket.org/multicoreware/x265_git.git
+           cd x265_git
+           ./configure --disable-shared --enable-static
+           make -j
+           make install
+           cd ..
            curl -o ffmpeg-9.0.1.tar.xz -L https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
            tar -xvf ffmpeg-9.0.1.tar.xz
            cd ffmpeg-9.0.1

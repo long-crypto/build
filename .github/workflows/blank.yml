@@ -187,10 +187,9 @@ jobs:
            make -j
            make install
            cd ..
-           git clone https://bitbucket.org/multicoreware/x265_git.git
-           cd x265_git
-           git checkout 4.2
-           cd ./build/linux
+           curl -o x265_4.2.tar.gz -L http://ftp.videolan.org/pub/videolan/x265/x265_4.2.tar.gz
+           tar xvf x265_4.2.tar.gz
+           cd x265_4.2/build/linux
            cmake -G "Unix Makefiles" -DENABLE_SHARED:bool=off ../../source
            make -j
            make install

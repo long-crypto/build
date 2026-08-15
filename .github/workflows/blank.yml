@@ -181,9 +181,9 @@ jobs:
       - name: Configure&build
         if: ${{ inputs.target == 'ffmpeg' }}
         run: |
-           curl -o ffmpeg-9.0.1.tar.xz -L https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
-           tar -xvf ffmpeg-9.0.1.tar.xz
-           cd ffmpeg-9.0.1
+           curl -o ffmpeg-8.1.2.tar.xz -L https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+           tar -xvf ffmpeg-8.1.2.tar.xz
+           cd ffmpeg-8.1.2
            mkdir build
            ./configure --disable-static --enable-shared --enable-nonfree --enable-gpl --prefix=./build
            make -j
@@ -194,4 +194,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
          name: ffmpeg
-         path: ./ffmpeg-9.0.1
+         path: ./ffmpeg-8.1.2

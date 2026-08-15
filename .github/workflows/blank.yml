@@ -183,14 +183,14 @@ jobs:
         run: |
            git clone https://code.videolan.org/videolan/x264.git
            cd x264
-           ./configure --disable-shared --enable-static
+           ./configure --disable-shared --enable-static --extra-cflags="-fPIC" --extra-ldflags="-fPIC" --enable-pic
            make -j
            make install
            cd ..
            curl -o x265_4.2.tar.gz -L http://ftp.videolan.org/pub/videolan/x265/x265_4.2.tar.gz
            tar xvf x265_4.2.tar.gz
            cd x265_4.2/build/linux
-           cmake -G "Unix Makefiles" -DENABLE_SHARED:bool=off ../../source
+           cmake -G "Unix Makefiles" -DENABLE_SHARED:bool=off -DCMAKE_POSITION_INDEPENDENT_CODE=ON ../../source
            make -j
            make install
            cd ../../../

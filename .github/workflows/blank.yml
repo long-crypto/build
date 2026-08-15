@@ -181,24 +181,10 @@ jobs:
       - name: Configure&build
         if: ${{ inputs.target == 'ffmpeg' }}
         run: |
-           git clone https://code.videolan.org/videolan/x264.git
-           cd x264
-           ./configure --disable-shared --enable-static --extra-cflags="-fPIC" --extra-ldflags="-fPIC" --enable-pic
-           make -j
-           make install
-           cd ..
-           curl -o x265_4.2.tar.gz -L http://ftp.videolan.org/pub/videolan/x265/x265_4.2.tar.gz
-           tar xvf x265_4.2.tar.gz
-           cd x265_4.2/build/linux
-           cmake -G "Unix Makefiles" -DENABLE_SHARED:bool=off -DCMAKE_POSITION_INDEPENDENT_CODE=ON ../../source
-           make -j
-           make install
-           cd ../../../
-           export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig/:$PKG_CONFIG_PATH
            curl -o ffmpeg-9.0.1.tar.xz -L https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
            tar -xvf ffmpeg-9.0.1.tar.xz
            cd ffmpeg-9.0.1
-           ./configure --disable-static --enable-shared --enable-libx265 --enable-libx264 --enable-nonfree --enable-gpl --pkg-config-flags="--static" --extra-cflags="-fPIC" --extra-ldflags="-fPIC" --enable-pic
+           ./configure --disable-static --enable-shared --enable-nonfree --enable-gpl
            make -j
 
       - name: Upload artifacts

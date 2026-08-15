@@ -198,7 +198,7 @@ jobs:
            curl -o ffmpeg-9.0.1.tar.xz -L https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz
            tar -xvf ffmpeg-9.0.1.tar.xz
            cd ffmpeg-9.0.1
-           ./configure --disable-static --enable-shared --enable-libx265 --enable-libx264 --enable-nonfree --enable-gpl --pkg-config-flags="--static"
+           ./configure --disable-static --enable-shared --enable-libx265 --enable-libx264 --enable-nonfree --enable-gpl --pkg-config-flags="--static" --extra-cflags="-fPIC" --extra-ldflags="-fPIC" --enable-pic
            make -j
 
       - name: Upload artifacts

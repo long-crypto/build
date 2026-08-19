@@ -37,7 +37,7 @@ run_install() {
 	pac --needed --noconfirm -S "${INSTALL_PKGS[@]}"
 
 	curl -o lsfg-vk-1.0.0.x86_64.tar.zst -L https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0.x86_64.tar.zst
-	pacman -U ./lsfg-vk-1.0.0.x86_64.tar.zst
+	pacman --needed --noconfirm -U ./lsfg-vk-1.0.0.x86_64.tar.zst
 
 	echo '== install glibc with patches for Easy Anti-Cheat (optionally)'
 	yes|pac -S glibc-eac lib32-glibc-eac

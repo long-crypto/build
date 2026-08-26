@@ -45,7 +45,7 @@ jobs:
         run: |
            git clone https://github.com/git/git
             cd git
-            git checkout v2.54.0
+            git checkout v2.55.0
             make configure
             ./configure --prefix=/run/media/jack/Data/bin/neovim
             make -j

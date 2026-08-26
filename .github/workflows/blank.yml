@@ -37,7 +37,7 @@ jobs:
           mkdir -p  /run/media/jack/Data/bin/neovim
           zypper -n refresh
           zypper -n install --no-recommends \
-            gcc gcc-c++ make cmake git pkg-config \
+            gcc gcc-c++ make cmake git pkg-config cargo \
             libopenssl-devel zlib-devel ncurses-devel autoconf libtool curl-devel diffutils gawk gettext
 
       - name: Configure&build

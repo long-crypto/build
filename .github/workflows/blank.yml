@@ -102,9 +102,9 @@ jobs:
           CFLAGS: -O3 -g -flto
           LDFLAGS: -O3 -g -flto
         run: |
-           curl -L https://codeberg.org/dnkl/foot/releases/download/1.27.0/foot-1.27.0.tar.gz -o foot-1.27.0.tar.gz
-           tar xvf foot-1.27.0.tar.gz
-            cd foot-1.27.0
+           curl -L https://codeberg.org/dnkl/foot/releases/download/1.28.0/foot-1.28.0.tar.gz -o foot-1.28.0.tar.gz
+           tar xvf foot-1.28.0.tar.gz
+            cd foot-1.28.0
             mkdir -p bld/release && cd bld/release
             meson --buildtype=release --prefix=/usr -Db_lto=true ../..
             ninja
@@ -114,7 +114,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
          name: foot
-         path: ./foot-1.27.0
+         path: ./foot-1.28.0
 
       - name: Install build dependencies
         if: ${{ inputs.target == 'sway' }}

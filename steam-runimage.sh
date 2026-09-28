@@ -21,7 +21,7 @@ run_install() {
 	set -e
 
 	INSTALL_PKGS=(
-		steam egl-wayland vulkan-radeon lib32-vulkan-radeon
+		steam egl-wayland vulkan-radeon lib32-vulkan-radeon yay
 		vulkan-intel lib32-vulkan-intel vulkan-nouveau lib32-vulkan-nouveau
 		lib32-libpipewire libpipewire pipewire base-devel git clang llvm cmake ninja 
 		lib32-libpipewire libpulse lib32-libpulse vkd3d lib32-vkd3d wget 
@@ -36,8 +36,9 @@ run_install() {
 	echo '== install packages'
 	pac --needed --noconfirm -S "${INSTALL_PKGS[@]}"
 
-	curl -o lsfg-vk-1.0.0.x86_64.tar.zst -L https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0.x86_64.tar.zst
-	sudo pac --needed --noconfirm -U ./lsfg-vk-1.0.0.x86_64.tar.zst
+	# curl -o lsfg-vk-1.0.0.x86_64.tar.zst -L https://github.com/PancakeTAS/lsfg-vk/releases/download/v1.0.0/lsfg-vk-1.0.0.x86_64.tar.zst
+	# sudo pac --needed --noconfirm -U ./lsfg-vk-1.0.0.x86_64.tar.zst
+	yay --needed --noconfirm -S lsfg-vk
 
 	echo '== install glibc with patches for Easy Anti-Cheat (optionally)'
 	yes|pac -S glibc-eac lib32-glibc-eac

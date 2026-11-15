@@ -13,7 +13,7 @@ URUNTIME="https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/refs
 
 if [ ! -x 'runimage' ]; then
 	echo '== download base RunImage'
-	curl -o runimage -L "https://github.com/VHSgunzo/runimage/releases/download/continuous/runimage-$(uname -m)"
+	curl -o runimage -L "https://github.com/long-crypto/runimage/releases/download/continuous/runimage-$(uname -m)"
 	chmod +x runimage
 fi
 
